@@ -1,0 +1,10 @@
+go 1.23.3
+
+// Uncomment each module as we create it with `go mod init`
+// use (
+//     ./services/api
+//     ./services/ingestor
+//     ./services/notifier
+//     ./services/scheduler
+//     ./packages/cli
+// )
