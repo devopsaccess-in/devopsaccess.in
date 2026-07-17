@@ -124,8 +124,10 @@ is embedded SQL).
   (rsync `.next/standalone` + node systemd unit). Extend `postgres` role: create
   `uptime` DB + `uptime_api`/`uptime_scheduler` roles (BYPASSRLS for scheduler;
   `ALTER ROLE uptime_scheduler BYPASSRLS`).
-- Terraform: add `app` A record (proxied) in `infra/terraform` (find the existing
-  Cloudflare record resources and mirror them).
+- DNS: there are NO Cloudflare resources in `infra/terraform` (the zone is
+  managed in the Cloudflare dashboard — apex + grafana precedent), so the
+  `app` A record (proxied, → server IP) is a manual dashboard task, not
+  Terraform. Decided 2026-07-17 to avoid adding the CF provider for one record.
 - CI `.github/workflows/deploy-app.yml`: build Go binaries **GOOS=linux GOARCH=amd64**
   (the VM is amd64 — configure.yml precedent, do NOT use arm64), build dashboard
   standalone, run the new roles by tag via the same Terraform-IP + Ansible pattern as
@@ -146,9 +148,36 @@ Deploy engine, OTel/APM ingestor, gRPC/protos, CLI, multi-region probes, Razorpa
 subscription automation, SMS/voice paging, on-call schedules, non-HTTP check types,
 team invites, custom status domains, Hindi UI, k3s/ArgoCD, Kafka/NATS/Redis.
 
-## 4. Exact current state of Phase B (uncommitted, on `feat/app/uptime-mvp`)
+## 4. Exact current state of Phase B (on `feat/app/uptime-mvp`)
 
-Done so far (committed on `feat/app/uptime-mvp`):
+**UPDATE 2026-07-17 (second session): B1–B5 are ALL BUILT and verified**
+(build + vet + unit tests green in services/api, services/scheduler,
+services/shared; dashboard typecheck + standalone build green; ansible/workflow
+YAML validated). Implementation notes vs the plan:
+
+- `shared/notify` (email via Postfix relay + Slack webhook) was added so the
+  API's channel-test endpoint and the scheduler share one sender.
+- RLS is on the 4 data tables + FORCE ROW LEVEL SECURITY (owner = uptime_api
+  runs migrations, so FORCE is required). Identity tables (tenants, users,
+  tenant_members) have NO RLS — they establish the tenant context (lookup by
+  auth0_sub, status page by slug). RLS integration test:
+  `DATABASE_URL=... go test -tags integration ./services/api` (must connect as
+  a non-superuser without BYPASSRLS).
+- Dashboard uses Next 16 `proxy.ts` (middleware.ts is deprecated), Auth0 v4
+  SDK, hand-rolled SVG charts (no chart lib), system fonts (no font files
+  copied from web). shadcn/ui skipped — small hand-written components in the
+  same style; add shadcn deliberately if the UI grows.
+- systemd units: uptime-api, uptime-scheduler, dashboard. deploy-app.yml
+  discovers the pnpm-monorepo standalone server.js path and passes
+  `dashboard_server_rel` to Ansible.
+- /api/me reads optional claims `https://devopsaccess.in/email` + `name` (else
+  standard email/name claims) — an Auth0 post-login Action should add them to
+  the access token, otherwise tenants get generic names/slugs (see §6).
+
+**What's left: the E2E gate (needs Auth0 tenant + secrets + DNS — user tasks
+in §6), then merge + Deploy App.**
+
+Done in the first session (committed on `feat/app/uptime-mvp`):
 - `services/shared/` — module `github.com/devopsaccess-in/devopsaccess.in/services/shared`,
   tidied, builds + vets green:
   - `db/db.go` — `Connect()` (pool + ping retry) and `WithTenant()`
@@ -201,5 +230,15 @@ Immediate next steps (in order):
 - Auth0 tenant setup (B6 of plan): Regular Web App, callbacks
   `https://app.devopsaccess.in/auth/callback` + localhost, API audience
   `https://api.devopsaccess.in` RS256, Google + email/password connections.
-- Cloudflare: verify Origin cert covers `*.devopsaccess.in`; add `app` DNS record is
-  in Terraform (CI applies it).
+  ALSO: a post-login Action adding custom claims
+  `https://devopsaccess.in/email` and `https://devopsaccess.in/name` to the
+  ACCESS token (event.user.email / event.user.name via
+  api.accessToken.setCustomClaim) — otherwise auto-provisioned tenants get
+  generic names.
+- New GitHub secrets for deploy-app.yml: `UPTIME_DB_PASSWORD`, `AUTH0_DOMAIN`,
+  `AUTH0_CLIENT_ID`, `AUTH0_CLIENT_SECRET`, `AUTH0_SECRET` (32+ random chars,
+  session encryption). `AUTH0_AUDIENCE` defaults to
+  https://api.devopsaccess.in everywhere.
+- Cloudflare (manual, dashboard): verify the Origin cert covers
+  `*.devopsaccess.in` (regenerate if not); add the `app` A record (proxied,
+  → server IP) — DNS is NOT in Terraform, see §3 B5.
