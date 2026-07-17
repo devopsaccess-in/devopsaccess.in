@@ -1,0 +1,200 @@
+name: Provision Infrastructure
+
+# Manual only — provisioning is destructive/costly, never on push.
+# Ported from the old devopsaccess-in repo; paths updated for the monorepo
+# (terraform → infra/terraform, ansible → infra/ansible). The uptime app
+# roles are skipped here — run the "Deploy App" workflow after provisioning
+# (it builds the binaries + dashboard the roles need).
+on:
+  workflow_dispatch:
+    inputs:
+      action:
+        description: "Terraform action"
+        required: true
+        default: apply
+        type: choice
+        options:
+          - apply
+          - destroy
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: infra
+  cancel-in-progress: false
+
+jobs:
+  provision:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: infra/terraform
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.9.5"
+
+      - name: Prepare SSH public key
+        id: ssh
+        env:
+          HETZNER_SSH_KEY: ${{ secrets.HETZNER_SSH_KEY }}
+        run: |
+          # Derive the public key from the stored private key.
+          mkdir -p ~/.ssh
+          echo "$HETZNER_SSH_KEY" > ~/.ssh/hetzner
+          chmod 600 ~/.ssh/hetzner
+          ssh-keygen -y -f ~/.ssh/hetzner > ~/.ssh/hetzner.pub
+          {
+            echo "pubkey<<EOF"
+            cat ~/.ssh/hetzner.pub
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Terraform Init
+        env:
+          TF_TOKEN_app_terraform_io: ${{ secrets.TF_CLOUD_TOKEN }}
+        run: terraform init
+
+      # Phase 1: create the server WITHOUT the firewall so port 22 stays open
+      # for Ansible. The firewall is attached later (phase 3) once sshd has
+      # been moved to var.ssh_port.
+      - name: Terraform Apply (phase 1 — server, no firewall)
+        if: ${{ github.event.inputs.action == 'apply' }}
+        env:
+          TF_TOKEN_app_terraform_io: ${{ secrets.TF_CLOUD_TOKEN }}
+          TF_VAR_hcloud_token: ${{ secrets.HCLOUD_TOKEN }}
+          TF_VAR_ssh_public_key: ${{ steps.ssh.outputs.pubkey }}
+          TF_VAR_attach_firewall: "false"
+        run: terraform apply -auto-approve
+
+      - name: Terraform Destroy
+        if: ${{ github.event.inputs.action == 'destroy' }}
+        env:
+          TF_TOKEN_app_terraform_io: ${{ secrets.TF_CLOUD_TOKEN }}
+          TF_VAR_hcloud_token: ${{ secrets.HCLOUD_TOKEN }}
+          TF_VAR_ssh_public_key: ${{ steps.ssh.outputs.pubkey }}
+          TF_VAR_attach_firewall: "true"
+        run: terraform destroy -auto-approve
+
+      - name: Capture server IP
+        if: ${{ github.event.inputs.action == 'apply' }}
+        id: tf
+        env:
+          TF_TOKEN_app_terraform_io: ${{ secrets.TF_CLOUD_TOKEN }}
+        run: echo "ip=$(terraform output -raw server_ipv4)" >> "$GITHUB_OUTPUT"
+
+      # -------------------------------------------------------------------
+      # Configure the freshly created server with Ansible.
+      # -------------------------------------------------------------------
+      - name: Setup Python
+        if: ${{ github.event.inputs.action == 'apply' }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install Ansible
+        if: ${{ github.event.inputs.action == 'apply' }}
+        run: pip install ansible
+
+      - name: Install Ansible collections
+        if: ${{ github.event.inputs.action == 'apply' }}
+        working-directory: infra/ansible
+        run: ansible-galaxy collection install -r requirements.yml
+
+      # Cross-compile the contact service for the server (linux/amd64).
+      # Building in CI keeps the Go toolchain off the production box.
+      - name: Setup Go
+        if: ${{ github.event.inputs.action == 'apply' }}
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.25"
+
+      - name: Build contact service (linux/amd64)
+        if: ${{ github.event.inputs.action == 'apply' }}
+        working-directory: services/contact
+        run: GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -o "$GITHUB_WORKSPACE/infra/ansible/roles/contact_api/files/contact" .
+
+      - name: Write inventory and SSH key
+        if: ${{ github.event.inputs.action == 'apply' }}
+        working-directory: infra/ansible
+        env:
+          SERVER_IP: ${{ steps.tf.outputs.ip }}
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.HETZNER_SSH_KEY }}" > ~/.ssh/hetzner
+          chmod 600 ~/.ssh/hetzner
+          cat > inventory/hosts.ini <<INVENTORY
+          [web]
+          ${SERVER_IP} ansible_user=root ansible_ssh_private_key_file=~/.ssh/hetzner ansible_port=22
+          INVENTORY
+
+      - name: Wait for SSH (port 22, fresh server)
+        if: ${{ github.event.inputs.action == 'apply' }}
+        env:
+          SERVER_IP: ${{ steps.tf.outputs.ip }}
+        run: |
+          for i in $(seq 1 30); do
+            if nc -z -w5 "${SERVER_IP}" 22; then echo "SSH up"; exit 0; fi
+            echo "waiting for ssh... ($i)"; sleep 10
+          done
+          echo "SSH never came up"; exit 1
+
+      # --skip-tags app: the uptime services need CI-built artifacts; deploy
+      # them with the Deploy App workflow right after provisioning. The
+      # postgres role still creates the uptime DB + roles here (guarded on
+      # uptime_db_password being set).
+      - name: Run Ansible playbook
+        if: ${{ github.event.inputs.action == 'apply' }}
+        working-directory: infra/ansible
+        env:
+          ANSIBLE_HOST_KEY_CHECKING: "False"
+          SMTP_USER: ${{ secrets.SMTP_USER }}
+          SMTP_PASS: ${{ secrets.SMTP_PASS }}
+          DB_PASSWORD: ${{ secrets.POSTGRES_PASSWORD }}
+          RAZORPAY_WEBHOOK_SECRET: ${{ secrets.RAZORPAY_WEBHOOK_SECRET }}
+          TURNSTILE_SECRET: ${{ secrets.TURNSTILE_SECRET }}
+          GRAFANA_ADMIN_PASSWORD: ${{ secrets.GRAFANA_ADMIN_PASSWORD }}
+          UPTIME_DB_PASSWORD: ${{ secrets.UPTIME_DB_PASSWORD }}
+        run: |
+          ansible-playbook site.yml --skip-tags app \
+            --extra-vars "ci_ssh_public_key='$(ssh-keygen -y -f ~/.ssh/hetzner)'" \
+            --extra-vars "origin_cert='${{ secrets.CLOUDFLARE_ORIGIN_CERT }}'" \
+            --extra-vars "origin_key='${{ secrets.CLOUDFLARE_ORIGIN_KEY }}'" \
+            --extra-vars "smtp_user=$SMTP_USER" \
+            --extra-vars "smtp_pass=$SMTP_PASS" \
+            --extra-vars "db_password=$DB_PASSWORD" \
+            --extra-vars "razorpay_webhook_secret=$RAZORPAY_WEBHOOK_SECRET" \
+            --extra-vars "turnstile_secret=$TURNSTILE_SECRET" \
+            --extra-vars "grafana_admin_password=$GRAFANA_ADMIN_PASSWORD" \
+            --extra-vars "uptime_db_password=$UPTIME_DB_PASSWORD"
+
+      # Phase 3: now that Ansible has moved sshd onto var.ssh_port, attach the
+      # firewall. This blocks port 22 at the network edge; SSH continues to
+      # work on the hardened port, which the firewall allows.
+      - name: Terraform Apply (phase 3 — attach firewall)
+        if: ${{ github.event.inputs.action == 'apply' }}
+        env:
+          TF_TOKEN_app_terraform_io: ${{ secrets.TF_CLOUD_TOKEN }}
+          TF_VAR_hcloud_token: ${{ secrets.HCLOUD_TOKEN }}
+          TF_VAR_ssh_public_key: ${{ steps.ssh.outputs.pubkey }}
+          TF_VAR_attach_firewall: "true"
+        run: terraform apply -auto-approve
+
+      - name: Output server info
+        if: ${{ github.event.inputs.action == 'apply' }}
+        env:
+          TF_TOKEN_app_terraform_io: ${{ secrets.TF_CLOUD_TOKEN }}
+        run: |
+          echo "### Server provisioned :rocket:" >> "$GITHUB_STEP_SUMMARY"
+          echo "IP: ${{ steps.tf.outputs.ip }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "SSH port: $(terraform output -raw ssh_port)" >> "$GITHUB_STEP_SUMMARY"
+          echo "Point the Cloudflare A records (apex, grafana, app — all proxied) at this IP." >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "Deploy Web / Deploy App read the IP/port from Terraform state — no SERVER_IP/SSH_PORT secrets needed." >> "$GITHUB_STEP_SUMMARY"

@@ -177,6 +177,18 @@ YAML validated). Implementation notes vs the plan:
 **What's left: the E2E gate (needs Auth0 tenant + secrets + DNS — user tasks
 in §6), then merge + Deploy App.**
 
+Also in place (same day, later session): `FEATURES.md` (feature inventory —
+every feature PR must update it + the e2e suite; rule also in CLAUDE.md),
+`e2e/` (black-box suite: real api+scheduler binaries + dashboard node server
+against disposable Postgres, fake Auth0 JWKS, SMTP/Slack sinks — runs in ~10s
+locally, see e2e/README.md), `.github/workflows/e2e.yml` (unit+vet+typecheck+
+e2e+RLS-integration on every PR), `.github/workflows/infra.yml` (provision
+workflow ported from the old repo, `--skip-tags app`), a PR template with the
+FEATURES/e2e checkboxes, and `docs/SECRETS.md` (exact secret names: copy the
+old repo's set, add the 5 new Auth0/uptime ones). Test hooks (documented,
+default-off): scheme-prefixed AUTH0_DOMAIN = issuer override,
+UPTIME_ALLOW_PRIVATE_TARGETS, SCHEDULER_TICK_SECONDS.
+
 Done in the first session (committed on `feat/app/uptime-mvp`):
 - `services/shared/` — module `github.com/devopsaccess-in/devopsaccess.in/services/shared`,
   tidied, builds + vets green:
