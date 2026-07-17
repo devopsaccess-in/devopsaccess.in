@@ -22,7 +22,8 @@ covered by package tests · **manual** = part of the pre-launch manual gate in
 | Alert channels: email + Slack webhook, per-channel test send | built | E2E `TestIncidentPipeline` |
 | Down + recovery notifications (restart-safe via `notify_state`, IST timestamps) | built | E2E `TestIncidentPipeline` |
 | Uptime % and check-result windows (`24h`/`7d`/`30d`) | built | E2E `TestIncidentPipeline` · unit `TestParseWindow` |
-| Public status page — API (`/api/status/{slug}`) | built | E2E `TestIncidentPipeline` |
+| Public status page — opt-in per tenant (off by default; `PATCH /api/settings` + Settings toggle) | built | E2E `TestIncidentPipeline` (404-before-opt-in) |
+| Public status page — API (`/api/status/{slug}`), no URL/cause leakage | built | E2E `TestIncidentPipeline` |
 | Public status page — dashboard UI (`/status/{slug}`) | built | E2E `TestDashboardStatusPage` |
 | Dashboard (authed): monitors list + sparklines, monitor detail + latency chart, incidents, channels, settings | built | manual (needs real Auth0) — pre-launch gate |
 | 30-day results retention (nightly purge) | built | code-reviewed; no automated test (startup purge logged) |

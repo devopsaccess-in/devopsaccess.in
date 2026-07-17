@@ -69,7 +69,10 @@ func (p *prober) notifyOne(ctx context.Context, i pendingIncident) {
 		p.log.Error().Err(err).Str("incident_id", i.ID).Msg("load channels failed")
 		return
 	}
+
+	attempted, failed := 0, 0
 	for _, c := range channels {
+		attempted++
 		sendCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
 		var sendErr error
 		switch c.typ {
@@ -80,9 +83,28 @@ func (p *prober) notifyOne(ctx context.Context, i pendingIncident) {
 		}
 		cancel()
 		if sendErr != nil {
+			failed++
 			p.log.Warn().Err(sendErr).Str("incident_id", i.ID).Str("channel_type", c.typ).
 				Msg("notification send failed")
 		}
+	}
+
+	// Only advance notify_state if there was nothing to deliver or at least
+	// one channel accepted the message; otherwise leave it so the next tick
+	// retries — a transient SMTP/Slack blip must not silently drop the alert.
+	// Guard against retrying a permanently broken channel forever by giving up
+	// once the incident (or its resolution) is older than notifyRetryWindow.
+	allFailed := attempted > 0 && failed == attempted
+	if allFailed {
+		since := i.StartedAt
+		if recovery && i.ResolvedAt != nil {
+			since = *i.ResolvedAt
+		}
+		if time.Since(since) < notifyRetryWindow {
+			return // keep pending; retry on a later tick
+		}
+		p.log.Error().Str("incident_id", i.ID).Bool("recovery", recovery).
+			Int("channels", attempted).Msg("giving up on notification after retry window; all channels failing")
 	}
 
 	next := "notified"
@@ -94,6 +116,11 @@ func (p *prober) notifyOne(ctx context.Context, i pendingIncident) {
 		p.log.Error().Err(err).Str("incident_id", i.ID).Msg("advance notify_state failed")
 	}
 }
+
+// notifyRetryWindow bounds how long the notifier keeps retrying an incident
+// whose channels are all failing, so one permanently broken webhook cannot
+// spin every tick forever.
+const notifyRetryWindow = time.Hour
 
 type channelTarget struct {
 	typ    string

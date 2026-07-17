@@ -89,6 +89,7 @@ func main() {
 				mr.Get("/{id}/results", s.monitorResults)
 				mr.Get("/{id}/uptime", s.monitorUptime)
 			})
+			tr.Patch("/api/settings", s.updateSettings)
 			tr.Get("/api/incidents", s.listIncidents)
 			tr.Get("/api/incidents/{id}", s.getIncident)
 			tr.Route("/api/channels", func(cr chi.Router) {

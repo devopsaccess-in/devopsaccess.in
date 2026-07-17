@@ -52,6 +52,9 @@ func validateMonitorFields(name, method string, interval, timeout, expected, thr
 	if strings.TrimSpace(name) == "" || len(name) > 100 {
 		return fmt.Errorf("name is required (max 100 chars)")
 	}
+	if strings.ContainsFunc(name, func(r rune) bool { return r == '\n' || r == '\r' || (r < 0x20 && r != '\t') }) {
+		return fmt.Errorf("name must not contain control characters")
+	}
 	if method != "GET" && method != "HEAD" {
 		return fmt.Errorf("method must be GET or HEAD")
 	}

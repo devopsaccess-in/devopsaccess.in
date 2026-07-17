@@ -29,8 +29,13 @@ type Mailer struct {
 
 // Send delivers a plain-text message, bounded by ctx (net/smtp has no context
 // support, so the blocking call runs in a goroutine — contact service
-// precedent).
+// precedent). Header fields (to, subject) are stripped of CR/LF so
+// user-controlled content (e.g. a monitor name in the subject) can never
+// inject additional SMTP headers or recipients.
 func (m *Mailer) Send(ctx context.Context, to, subject, body string) error {
+	to = stripHeaderChars(to)
+	subject = stripHeaderChars(subject)
+
 	var b strings.Builder
 	fmt.Fprintf(&b, "From: DevOps Access Alerts <%s>\r\n", m.From)
 	fmt.Fprintf(&b, "To: %s\r\n", to)
@@ -60,6 +65,12 @@ func (m *Mailer) Send(ctx context.Context, to, subject, body string) error {
 		}
 		return nil
 	}
+}
+
+// stripHeaderChars removes CR and LF so a value placed in an email header
+// cannot terminate the header and inject new ones (header injection).
+func stripHeaderChars(s string) string {
+	return strings.NewReplacer("\r", "", "\n", "").Replace(s)
 }
 
 // Slack posts a simple text message to an incoming-webhook URL.

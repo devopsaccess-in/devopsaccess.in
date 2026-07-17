@@ -2,9 +2,12 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
+	"net/url"
 	"time"
+	"unicode/utf8"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/rs/zerolog"
@@ -104,7 +107,7 @@ func check(ctx context.Context, j job, insecureTargets bool) checkResult {
 	resp, err := client.Do(req)
 	latency := int(time.Since(start).Milliseconds())
 	if err != nil {
-		return checkResult{LatencyMs: latency, Error: truncate(err.Error(), 300)}
+		return checkResult{LatencyMs: latency, Error: probeErrorMessage(err)}
 	}
 	defer resp.Body.Close()
 
@@ -200,9 +203,31 @@ func (p *prober) tick(ctx context.Context) {
 	}
 }
 
+// probeErrorMessage renders a probe failure WITHOUT the target URL. Go's
+// transport errors are *url.Error, whose Error() embeds the full URL — which
+// may carry secret tokens or internal hostnames in its path/query. We surface
+// only the underlying cause (a timeout, DNS failure, connection refused,
+// blocked-address rejection, etc.), so the message is safe to store in an
+// incident cause and expose on the public status page.
+func probeErrorMessage(err error) string {
+	msg := err.Error()
+	var ue *url.Error
+	if errors.As(err, &ue) && ue.Err != nil {
+		msg = fmt.Sprintf("%s: %s", ue.Op, ue.Err.Error())
+	}
+	return truncate(msg, 300)
+}
+
+// truncate shortens s to at most n bytes on a rune boundary, so the result is
+// always valid UTF-8 (Postgres rejects invalid byte sequences, which would
+// otherwise fail the monitor_results INSERT and stall the whole pipeline).
 func truncate(s string, n int) string {
 	if len(s) <= n {
 		return s
+	}
+	// Back up to the start of the rune that straddles the cut.
+	for n > 0 && !utf8.RuneStart(s[n]) {
+		n--
 	}
 	return s[:n]
 }

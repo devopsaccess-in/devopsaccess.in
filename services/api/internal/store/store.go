@@ -38,10 +38,11 @@ type User struct {
 }
 
 type Tenant struct {
-	ID        string    `json:"id"`
-	Name      string    `json:"name"`
-	Slug      string    `json:"slug"`
-	CreatedAt time.Time `json:"created_at"`
+	ID                  string    `json:"id"`
+	Name                string    `json:"name"`
+	Slug                string    `json:"slug"`
+	PublicStatusEnabled bool      `json:"public_status_enabled"`
+	CreatedAt           time.Time `json:"created_at"`
 }
 
 type Monitor struct {
@@ -198,8 +199,30 @@ func UpdateMonitor(ctx context.Context, q Querier, tenantID, id string, p Monito
 	if p.Enabled != nil {
 		add("enabled", *p.Enabled)
 	}
-	return scanMonitor(q.QueryRow(ctx, `UPDATE monitors SET `+strings.Join(sets, ", ")+`
+	m, err := scanMonitor(q.QueryRow(ctx, `UPDATE monitors SET `+strings.Join(sets, ", ")+`
 		WHERE id = $1 AND tenant_id = $2 RETURNING `+monitorCols, args...))
+	if err != nil {
+		return Monitor{}, err
+	}
+
+	// A URL change resets the state machine to unknown, and pausing stops
+	// probing — either way an open incident would otherwise never resolve
+	// (the scheduler only resolves down->up transitions) and would show as
+	// "ongoing" forever, blocking future incidents via the open-incident
+	// unique index. Close it here, in the same transaction. notify_state is
+	// forced terminal so this administrative close never emits a spurious
+	// down or recovery alert.
+	urlChanged := p.URL != nil
+	paused := p.Enabled != nil && !*p.Enabled
+	if urlChanged || paused {
+		if _, err := q.Exec(ctx, `UPDATE incidents
+			SET resolved_at = now(), notify_state = 'recovered_notified'
+			WHERE monitor_id = $1 AND tenant_id = $2 AND resolved_at IS NULL`,
+			id, tenantID); err != nil {
+			return Monitor{}, fmt.Errorf("resolve open incident on config change: %w", err)
+		}
+	}
+	return m, nil
 }
 
 func DeleteMonitor(ctx context.Context, q Querier, tenantID, id string) error {
@@ -346,13 +369,17 @@ func DeleteChannel(ctx context.Context, q Querier, tenantID, id string) error {
 
 // --- identity + provisioning (pool-level; no tenant context yet) ---
 
-// TenantForSub resolves the tenant for a verified Auth0 subject.
+// TenantForSub resolves the tenant for a verified Auth0 subject. The ORDER BY
+// MUST match userTenant (which backs /api/me) so a user with more than one
+// membership is scoped to the same tenant the dashboard displays.
 func TenantForSub(ctx context.Context, q Querier, sub string) (string, error) {
 	var tenantID string
-	err := q.QueryRow(ctx, `SELECT tm.tenant_id
-		FROM users u JOIN tenant_members tm ON tm.user_id = u.id
+	err := q.QueryRow(ctx, `SELECT t.id
+		FROM users u
+		JOIN tenant_members tm ON tm.user_id = u.id
+		JOIN tenants t ON t.id = tm.tenant_id
 		WHERE u.auth0_sub = $1
-		ORDER BY tm.tenant_id LIMIT 1`, sub).Scan(&tenantID)
+		ORDER BY t.created_at LIMIT 1`, sub).Scan(&tenantID)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return "", ErrNotFound
 	}
@@ -364,8 +391,9 @@ func TenantForSub(ctx context.Context, q Querier, sub string) (string, error) {
 
 func TenantBySlug(ctx context.Context, q Querier, slug string) (Tenant, error) {
 	var t Tenant
-	err := q.QueryRow(ctx, `SELECT id, name, slug, created_at FROM tenants WHERE slug = $1`, slug).
-		Scan(&t.ID, &t.Name, &t.Slug, &t.CreatedAt)
+	err := q.QueryRow(ctx, `SELECT id, name, slug, public_status_enabled, created_at
+		FROM tenants WHERE slug = $1`, slug).
+		Scan(&t.ID, &t.Name, &t.Slug, &t.PublicStatusEnabled, &t.CreatedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return Tenant{}, ErrNotFound
 	}
@@ -373,6 +401,19 @@ func TenantBySlug(ctx context.Context, q Querier, slug string) (Tenant, error) {
 		return Tenant{}, fmt.Errorf("tenant by slug: %w", err)
 	}
 	return t, nil
+}
+
+// SetPublicStatus toggles a tenant's public status page on or off.
+func SetPublicStatus(ctx context.Context, q Querier, tenantID string, enabled bool) error {
+	tag, err := q.Exec(ctx, `UPDATE tenants SET public_status_enabled = $2 WHERE id = $1`,
+		tenantID, enabled)
+	if err != nil {
+		return fmt.Errorf("set public status: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrNotFound
+	}
+	return nil
 }
 
 // EnsureUser returns the user + tenant for an Auth0 subject, provisioning a
@@ -431,14 +472,14 @@ func userTenant(ctx context.Context, q Querier, sub string) (User, Tenant, error
 	var u User
 	var t Tenant
 	err := q.QueryRow(ctx, `SELECT u.id, u.auth0_sub, u.email, u.name, u.created_at,
-			t.id, t.name, t.slug, t.created_at
+			t.id, t.name, t.slug, t.public_status_enabled, t.created_at
 		FROM users u
 		JOIN tenant_members tm ON tm.user_id = u.id
 		JOIN tenants t ON t.id = tm.tenant_id
 		WHERE u.auth0_sub = $1
 		ORDER BY t.created_at LIMIT 1`, sub).
 		Scan(&u.ID, &u.Auth0Sub, &u.Email, &u.Name, &u.CreatedAt,
-			&t.ID, &t.Name, &t.Slug, &t.CreatedAt)
+			&t.ID, &t.Name, &t.Slug, &t.PublicStatusEnabled, &t.CreatedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return User{}, Tenant{}, ErrNotFound
 	}
@@ -458,8 +499,8 @@ func createTenantWithUniqueSlug(ctx context.Context, q Querier, base string) (Te
 		var t Tenant
 		err := q.QueryRow(ctx, `INSERT INTO tenants (name, slug) VALUES ($1, $2)
 			ON CONFLICT (slug) DO NOTHING
-			RETURNING id, name, slug, created_at`, base, candidate).
-			Scan(&t.ID, &t.Name, &t.Slug, &t.CreatedAt)
+			RETURNING id, name, slug, public_status_enabled, created_at`, base, candidate).
+			Scan(&t.ID, &t.Name, &t.Slug, &t.PublicStatusEnabled, &t.CreatedAt)
 		if errors.Is(err, pgx.ErrNoRows) {
 			continue // slug taken, try the next suffix
 		}

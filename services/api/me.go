@@ -28,3 +28,25 @@ func (s *server) handleMe(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"user": user, "tenant": tenant})
 }
+
+// updateSettings updates tenant-level settings. Currently just the public
+// status-page toggle. Tenant-scoped (requireTenant) so a user can only change
+// their own workspace.
+func (s *server) updateSettings(w http.ResponseWriter, r *http.Request) {
+	var in struct {
+		PublicStatusEnabled *bool `json:"public_status_enabled"`
+	}
+	if err := decodeJSON(w, r, &in); err != nil {
+		s.writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if in.PublicStatusEnabled == nil {
+		s.writeError(w, http.StatusBadRequest, "no settings to update")
+		return
+	}
+	if err := store.SetPublicStatus(r.Context(), s.pool, tenantID(r.Context()), *in.PublicStatusEnabled); err != nil {
+		s.storeError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]bool{"public_status_enabled": *in.PublicStatusEnabled})
+}

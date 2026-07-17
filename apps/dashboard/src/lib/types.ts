@@ -46,7 +46,13 @@ export type Channel = {
 
 export type Me = {
   user: { id: string; email: string; name: string; created_at: string };
-  tenant: { id: string; name: string; slug: string; created_at: string };
+  tenant: {
+    id: string;
+    name: string;
+    slug: string;
+    public_status_enabled: boolean;
+    created_at: string;
+  };
 };
 
 export type Uptime = {

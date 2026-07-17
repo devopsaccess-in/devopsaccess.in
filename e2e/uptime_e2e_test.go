@@ -127,6 +127,8 @@ func TestMonitorValidation(t *testing.T) {
 		{"name": "m", "url": "https://example.com", "interval_seconds": 30},
 		{"name": "m", "url": "https://example.com", "failure_threshold": 99},
 		{"name": "m", "url": "https://example.com", "timeout_ms": 100},
+		// CRLF in the name would enable SMTP header injection via the alert subject.
+		{"name": "evil\r\nBcc: victim@example.com", "url": "https://example.com"},
 	}
 	for i, payload := range bad {
 		if s := c.do(t, "POST", "/api/monitors", payload, nil); s != http.StatusBadRequest {
@@ -208,6 +210,14 @@ func TestIncidentPipeline(t *testing.T) {
 	mailSink.waitFor(t, alertTo, "DOWN: prod api", 20*time.Second)
 	slackSink.waitFor(t, "DOWN: prod api", 20*time.Second)
 
+	// Public status is opt-in: 404 until the tenant enables it (guessable
+	// slugs must reveal nothing).
+	anon := &apiClient{http: c.http}
+	if s := anon.do(t, "GET", "/api/status/"+me.Tenant.Slug, nil, nil); s != http.StatusNotFound {
+		t.Fatalf("status page before opt-in = %d, want 404", s)
+	}
+	c.mustDo(t, "PATCH", "/api/settings", map[string]any{"public_status_enabled": true}, nil, http.StatusOK)
+
 	// Public status API reflects the outage — no auth.
 	var status struct {
 		Monitors []struct {
@@ -215,10 +225,10 @@ func TestIncidentPipeline(t *testing.T) {
 			State string `json:"state"`
 		} `json:"monitors"`
 		Incidents []struct {
-			ID string `json:"id"`
+			ID    string `json:"id"`
+			Cause string `json:"cause"`
 		} `json:"incidents"`
 	}
-	anon := &apiClient{http: c.http}
 	anon.mustDo(t, "GET", "/api/status/"+me.Tenant.Slug, nil, &status, http.StatusOK)
 	foundDown := false
 	for _, sm := range status.Monitors {
@@ -228,6 +238,13 @@ func TestIncidentPipeline(t *testing.T) {
 	}
 	if !foundDown || len(status.Incidents) == 0 {
 		t.Fatalf("status page missing outage: %+v", status)
+	}
+	// The public payload must not leak the technical cause (which can carry
+	// the monitor URL / internal error detail).
+	for _, inc := range status.Incidents {
+		if inc.Cause != "" {
+			t.Fatalf("public status incident leaked cause: %q", inc.Cause)
+		}
 	}
 	if s := anon.do(t, "GET", "/api/status/no-such-tenant-slug", nil, nil); s != http.StatusNotFound {
 		t.Fatalf("unknown slug = %d, want 404", s)
@@ -298,6 +315,7 @@ func TestDashboardStatusPage(t *testing.T) {
 	var m monitorResp
 	c.mustDo(t, "POST", "/api/monitors", monitorPayload("dash monitor", target.URL, 2), &m, http.StatusCreated)
 	waitForState(t, c, m.ID, "up", 30*time.Second)
+	c.mustDo(t, "PATCH", "/api/settings", map[string]any{"public_status_enabled": true}, nil, http.StatusOK)
 
 	resp, err := c.http.Get(dashBase + "/status/" + me.Tenant.Slug)
 	if err != nil {
