@@ -25,9 +25,15 @@ type Verifier struct {
 }
 
 // NewVerifier builds a Verifier for an Auth0 domain (e.g.
-// "devopsaccess.eu.auth0.com") and API audience.
+// "devopsaccess.eu.auth0.com") and API audience. A domain given with an
+// explicit http(s):// scheme is used as the issuer base URL verbatim — that
+// form exists for the E2E harness, which serves a local JWKS; production
+// config always passes a bare domain.
 func NewVerifier(domain, audience string) *Verifier {
 	issuer := "https://" + domain + "/"
+	if strings.HasPrefix(domain, "http://") || strings.HasPrefix(domain, "https://") {
+		issuer = strings.TrimSuffix(domain, "/") + "/"
+	}
 	return &Verifier{
 		issuer:   issuer,
 		audience: audience,

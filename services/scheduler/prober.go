@@ -44,6 +44,9 @@ type prober struct {
 	}
 	slackClient *http.Client
 	jobs        chan job
+	// insecureTargets probes with a plain HTTP client instead of the
+	// SSRF-guarded one. E2E-test hook ONLY.
+	insecureTargets bool
 }
 
 // claimDue atomically claims monitors whose interval has elapsed by stamping
@@ -82,9 +85,12 @@ func (p *prober) claimDue(ctx context.Context, limit int) ([]job, error) {
 
 // check probes the monitor's URL through the SSRF-guarded client. Any
 // transport error or unexpected status is a failure with a short cause.
-func check(ctx context.Context, j job) checkResult {
+func check(ctx context.Context, j job, insecureTargets bool) checkResult {
 	timeout := time.Duration(j.TimeoutMs) * time.Millisecond
 	client := safehttp.Client(timeout)
+	if insecureTargets {
+		client = &http.Client{Timeout: timeout}
+	}
 
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
@@ -170,7 +176,7 @@ func (p *prober) runOne(ctx context.Context, j job) {
 			p.log.Error().Interface("panic", v).Str("monitor_id", j.ID).Msg("check panicked")
 		}
 	}()
-	r := check(ctx, j)
+	r := check(ctx, j, p.insecureTargets)
 	if err := p.apply(ctx, j, r); err != nil {
 		p.log.Error().Err(err).Str("monitor_id", j.ID).Msg("apply check result failed")
 		return

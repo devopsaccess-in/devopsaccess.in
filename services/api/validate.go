@@ -26,8 +26,9 @@ func defaultLookup(ctx context.Context, host string) ([]net.IP, error) {
 // non-http(s) schemes, embedded credentials, non-standard ports, and hosts
 // that are (or resolve to) non-public IPs. The prober's dialer re-validates
 // every resolved IP at connect time (DNS rebinding defense) — this is the
-// early, friendly layer of the same rule.
-func validateMonitorURL(ctx context.Context, raw string, lookup lookupFunc) error {
+// early, friendly layer of the same rule. allowPrivate skips the port and
+// public-IP checks (E2E-test hook, mirrored in the scheduler).
+func validateMonitorURL(ctx context.Context, raw string, lookup lookupFunc, allowPrivate bool) error {
 	u, err := url.Parse(strings.TrimSpace(raw))
 	if err != nil {
 		return fmt.Errorf("url is not valid")
@@ -41,6 +42,9 @@ func validateMonitorURL(ctx context.Context, raw string, lookup lookupFunc) erro
 	host := u.Hostname()
 	if host == "" {
 		return fmt.Errorf("url has no host")
+	}
+	if allowPrivate {
+		return nil
 	}
 	if port := u.Port(); port != "" && port != "80" && port != "443" {
 		return fmt.Errorf("only ports 80 and 443 are allowed")

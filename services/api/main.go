@@ -46,6 +46,12 @@ func main() {
 	cancel()
 	defer pool.Close()
 
+	probe := safehttp.Client(10 * time.Second)
+	if cfg.allowPrivateTargets {
+		// E2E-test hook: webhooks may point at local sink servers.
+		log.Warn().Msg("UPTIME_ALLOW_PRIVATE_TARGETS=true — SSRF guards disabled, never use in production")
+		probe = &http.Client{Timeout: 10 * time.Second}
+	}
 	s := &server{
 		cfg:  cfg,
 		pool: pool,
@@ -53,7 +59,7 @@ func main() {
 		mailer: &notify.Mailer{
 			Host: cfg.smtpHost, Port: cfg.smtpPort, From: cfg.mailFrom,
 		},
-		probe: safehttp.Client(10 * time.Second),
+		probe: probe,
 	}
 	verifier := auth.NewVerifier(cfg.auth0Domain, cfg.auth0Audience)
 

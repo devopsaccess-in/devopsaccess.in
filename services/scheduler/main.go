@@ -7,6 +7,7 @@ package main
 
 import (
 	"context"
+	"net/http"
 	"os"
 	"os/signal"
 	"sync"
@@ -39,29 +40,32 @@ func main() {
 	}
 	defer pool.Close()
 
+	// Slack webhook URLs are customer input: SSRF-guarded client only. The
+	// plain client exists for the E2E harness (local sink servers).
+	slackClient := safehttp.Client(10 * time.Second)
+	if cfg.allowPrivateTargets {
+		log.Warn().Msg("UPTIME_ALLOW_PRIVATE_TARGETS=true — SSRF guards disabled, never use in production")
+		slackClient = &http.Client{Timeout: 10 * time.Second}
+	}
 	p := &prober{
 		pool: pool,
 		log:  log,
 		mailer: &notify.Mailer{
 			Host: cfg.smtpHost, Port: cfg.smtpPort, From: cfg.mailFrom,
 		},
-		// Slack webhook URLs are customer input: SSRF-guarded client only.
-		slackClient: safehttp.Client(10 * time.Second),
-		jobs:        make(chan job, 200),
+		slackClient:     slackClient,
+		jobs:            make(chan job, 200),
+		insecureTargets: cfg.allowPrivateTargets,
 	}
 
 	var wg sync.WaitGroup
 	for range cfg.workers {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			p.worker(ctx)
-		}()
+		wg.Go(func() { p.worker(ctx) })
 	}
 	log.Info().Int("workers", cfg.workers).Msg("scheduler started")
 
 	p.purgeOldResults(ctx)
-	tick := time.NewTicker(10 * time.Second)
+	tick := time.NewTicker(time.Duration(cfg.tickSeconds) * time.Second)
 	defer tick.Stop()
 	purge := time.NewTicker(24 * time.Hour)
 	defer purge.Stop()

@@ -39,7 +39,7 @@ func (s *server) createChannel(w http.ResponseWriter, r *http.Request) {
 		s.writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	config, err := validateChannel(in.Type, in.Config)
+	config, err := validateChannel(in.Type, in.Config, s.cfg.allowPrivateTargets)
 	if err != nil {
 		s.writeError(w, http.StatusBadRequest, err.Error())
 		return
@@ -60,7 +60,8 @@ func (s *server) createChannel(w http.ResponseWriter, r *http.Request) {
 
 // validateChannel checks the type-specific config and returns it with only
 // the known keys kept, so arbitrary JSON never lands in the database.
-func validateChannel(typ string, config map[string]any) (map[string]any, error) {
+// allowPrivate permits http webhooks (E2E-test hook).
+func validateChannel(typ string, config map[string]any, allowPrivate bool) (map[string]any, error) {
 	switch typ {
 	case "email":
 		to, _ := config["to"].(string)
@@ -72,7 +73,8 @@ func validateChannel(typ string, config map[string]any) (map[string]any, error) 
 	case "slack_webhook":
 		raw, _ := config["url"].(string)
 		u, err := url.Parse(strings.TrimSpace(raw))
-		if err != nil || u.Scheme != "https" || u.Host == "" {
+		httpsOK := u != nil && (u.Scheme == "https" || (allowPrivate && u.Scheme == "http"))
+		if err != nil || !httpsOK || u.Host == "" {
 			return nil, fmt.Errorf(`slack_webhook channel needs config.url, an https webhook URL`)
 		}
 		return map[string]any{"url": u.String()}, nil

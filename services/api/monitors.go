@@ -95,7 +95,7 @@ func (s *server) createMonitor(w http.ResponseWriter, r *http.Request) {
 		s.writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	if err := validateMonitorURL(r.Context(), in.URL, defaultLookup); err != nil {
+	if err := validateMonitorURL(r.Context(), in.URL, defaultLookup, s.cfg.allowPrivateTargets); err != nil {
 		s.writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
@@ -170,7 +170,7 @@ func (s *server) updateMonitor(w http.ResponseWriter, r *http.Request) {
 	if p.Name != nil {
 		*p.Name = strings.TrimSpace(*p.Name)
 	}
-	if err := validatePatch(r, p); err != nil {
+	if err := validatePatch(r, p, s.cfg.allowPrivateTargets); err != nil {
 		s.writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
@@ -189,7 +189,7 @@ func (s *server) updateMonitor(w http.ResponseWriter, r *http.Request) {
 }
 
 // validatePatch checks only the fields present, reusing the create-time rules.
-func validatePatch(r *http.Request, p store.MonitorPatch) error {
+func validatePatch(r *http.Request, p store.MonitorPatch, allowPrivate bool) error {
 	name, method := "monitor", "GET"
 	interval, timeout, expected, threshold := 60, 10000, 200, 2
 	if p.Name != nil {
@@ -214,7 +214,7 @@ func validatePatch(r *http.Request, p store.MonitorPatch) error {
 		return err
 	}
 	if p.URL != nil {
-		return validateMonitorURL(r.Context(), *p.URL, defaultLookup)
+		return validateMonitorURL(r.Context(), *p.URL, defaultLookup, allowPrivate)
 	}
 	return nil
 }

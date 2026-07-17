@@ -18,6 +18,11 @@ type config struct {
 	smtpHost string
 	smtpPort string
 	mailFrom string
+
+	// allowPrivateTargets disables the SSRF guards on monitor URLs and
+	// channel webhooks (private IPs, non-80/443 ports, http webhooks).
+	// E2E-test hook ONLY — never set in production.
+	allowPrivateTargets bool
 }
 
 func loadConfig() (config, error) {
@@ -29,6 +34,8 @@ func loadConfig() (config, error) {
 		smtpHost:      envOr("SMTP_HOST", "127.0.0.1"),
 		smtpPort:      envOr("SMTP_PORT", "25"),
 		mailFrom:      envOr("ALERT_FROM", "alerts@devopsaccess.in"),
+
+		allowPrivateTargets: os.Getenv("UPTIME_ALLOW_PRIVATE_TARGETS") == "true",
 	}
 	if c.databaseURL == "" {
 		return config{}, fmt.Errorf("DATABASE_URL is required")

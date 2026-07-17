@@ -70,23 +70,25 @@ func TestValidateMonitorFields(t *testing.T) {
 
 func TestValidateChannel(t *testing.T) {
 	tests := []struct {
-		name    string
-		typ     string
-		config  map[string]any
-		wantErr bool
+		name         string
+		typ          string
+		config       map[string]any
+		allowPrivate bool
+		wantErr      bool
 	}{
-		{"valid email", "email", map[string]any{"to": "ops@example.com"}, false},
-		{"email with display name", "email", map[string]any{"to": "Ops <ops@example.com>"}, false},
-		{"email missing to", "email", map[string]any{}, true},
-		{"email invalid", "email", map[string]any{"to": "not-an-email"}, true},
-		{"valid slack", "slack_webhook", map[string]any{"url": "https://hooks.slack.com/services/T0/B0/xyz"}, false},
-		{"slack http rejected", "slack_webhook", map[string]any{"url": "http://hooks.slack.com/services/x"}, true},
-		{"slack missing url", "slack_webhook", map[string]any{}, true},
-		{"unknown type", "pager", map[string]any{}, true},
+		{"valid email", "email", map[string]any{"to": "ops@example.com"}, false, false},
+		{"email with display name", "email", map[string]any{"to": "Ops <ops@example.com>"}, false, false},
+		{"email missing to", "email", map[string]any{}, false, true},
+		{"email invalid", "email", map[string]any{"to": "not-an-email"}, false, true},
+		{"valid slack", "slack_webhook", map[string]any{"url": "https://hooks.slack.com/services/T0/B0/xyz"}, false, false},
+		{"slack http rejected", "slack_webhook", map[string]any{"url": "http://hooks.slack.com/services/x"}, false, true},
+		{"slack http allowed in e2e hook", "slack_webhook", map[string]any{"url": "http://127.0.0.1:39321/hook"}, true, false},
+		{"slack missing url", "slack_webhook", map[string]any{}, false, true},
+		{"unknown type", "pager", map[string]any{}, false, true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			cfg, err := validateChannel(tt.typ, tt.config)
+			cfg, err := validateChannel(tt.typ, tt.config, tt.allowPrivate)
 			if (err != nil) != tt.wantErr {
 				t.Fatalf("error = %v, wantErr %v", err, tt.wantErr)
 			}
