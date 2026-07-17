@@ -1,0 +1,41 @@
+---
+title: "Where the money hides in a Kubernetes bill"
+description: "Most clusters carry 40–60% waste. Here's a repeatable order of operations for finding it — requests vs usage, idle node pools, forgotten environments — without breaking anything."
+pubDate: 2026-05-30
+tags: ["finops", "kubernetes", "cost"]
+readingTime: "8 min"
+---
+
+Almost every cluster I'm handed is overpaying, and almost always in the same places. The waste isn't exotic — it's the accumulated residue of reasonable decisions nobody revisited. Here's the order I work in.
+
+## 1. Requests vs actual usage
+
+The single biggest lever. Teams set CPU and memory **requests** generously "to be safe," the scheduler reserves that capacity, and nodes fill up on paper while sitting near-idle in reality.
+
+Pull two weeks of usage and compare it to requests. A workload requesting 2 cores and using 0.3 at p95 is paying 6× for headroom it never touches. Right-sizing requests — carefully, with limits and real percentiles — is usually where the first 20–30% comes from.
+
+## 2. Node pools that don't match the workload
+
+Once requests are honest, the bin-packing changes. You'll often find:
+
+- Node pools sized for a peak that rarely happens.
+- One enormous machine type where two smaller ones would pack tighter.
+- No separation between bursty batch work and steady services, so the steady services pay for the burst capacity.
+
+## 3. Idle and forgotten environments
+
+The unglamorous wins. Staging clusters running 24/7 for a team that works one timezone. Preview environments that were never torn down. A "temporary" load-test namespace from last quarter.
+
+A scheduled scale-to-zero on non-prod overnight and on weekends is dull and enormously effective.
+
+## 4. Commitments and spot
+
+Only **after** the above. Buying committed-use discounts against a wasteful baseline just locks in the waste. Once usage is honest, commit to the steady floor and run interruptible/spot capacity for anything fault-tolerant.
+
+## The guardrail that makes it stick
+
+Savings decay. Without a feedback loop, requests creep back up within a quarter. So the engagement doesn't end at the savings — it ends with **showback** (every team sees its own spend), budget alerts, and a periodic right-sizing job. Cost becomes a number engineers can see and own, not a surprise finance forwards around.
+
+> The goal isn't a one-time cut. It's making waste visible enough that it can't quietly return.
+
+If your bill has grown faster than your traffic, that gap is almost entirely findable. It's just a question of working through it in the right order.

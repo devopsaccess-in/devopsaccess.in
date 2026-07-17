@@ -1,0 +1,25 @@
+---
+client: "Series-B SaaS platform"
+sector: "B2B SaaS"
+challenge: "GKE bill growing faster than revenue, with no visibility into which teams or services drove the cost."
+stack: ["GKE", "Terraform", "Prometheus", "Grafana"]
+result: "Cut cluster cost 52% in eight weeks"
+pubDate: 2026-04-20
+---
+
+## The situation
+
+The platform had scaled fast on a single large GKE cluster shared across every team. The monthly bill had roughly tripled in a year while revenue had not, and finance was asking questions nobody on the engineering side could answer — because there was no breakdown of cost by team, service or environment.
+
+## What we did
+
+We worked in the order that protects the savings:
+
+- **Visibility first.** Labelled workloads by team and environment, then built a Grafana view showing spend and utilization side by side. For the first time, every team could see its own footprint.
+- **Right-sized requests.** Two weeks of usage data showed most services requested 4–6× the CPU they used at p95. We tuned requests and limits service by service, with the owning teams in the loop.
+- **Reshaped node pools.** With honest requests, the cluster bin-packed onto fewer, better-matched machine types, and bursty batch work moved to its own preemptible pool.
+- **Scheduled non-prod to sleep.** Staging and preview environments scaled to zero overnight and on weekends.
+
+## The result
+
+Cluster cost dropped **52%** over eight weeks, with no impact on production latency or reliability. More importantly, the showback dashboards and budget alerts we left behind mean the savings haven't crept back — each team now owns its number.

@@ -1,0 +1,87 @@
+/* Fonts are self-hosted via next/font/local (src/lib/fonts.ts). */
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    color-scheme: dark;
+  }
+
+  body {
+    @apply bg-ink text-mist font-body antialiased;
+    background-image:
+      radial-gradient(60rem 60rem at 80% -10%, rgba(45, 212, 191, 0.06), transparent),
+      radial-gradient(40rem 40rem at 0% 10%, rgba(245, 166, 35, 0.05), transparent);
+    background-attachment: fixed;
+  }
+
+  ::selection {
+    @apply bg-node/30 text-white;
+  }
+
+  h1, h2, h3, h4 {
+    @apply font-display text-white;
+    text-wrap: balance;
+  }
+
+  a {
+    @apply transition-colors duration-150;
+  }
+}
+
+@layer components {
+  .container-px {
+    @apply mx-auto w-full max-w-6xl px-5 sm:px-8;
+  }
+
+  /* The signature element: a "status pill" borrowed from a control plane.
+     A small monospace tag with a pulsing healthy-node dot. */
+  .status-pill {
+    @apply inline-flex items-center gap-2 rounded-full border border-ink-line
+           bg-ink-soft px-3 py-1 font-mono text-xs text-mist-dim;
+  }
+  .status-dot {
+    @apply h-2 w-2 rounded-full bg-node;
+    box-shadow: 0 0 0 0 rgba(45, 212, 191, 0.6);
+    animation: pulse-node 2.4s infinite;
+  }
+
+  .btn-primary {
+    @apply inline-flex items-center justify-center gap-2 rounded-md bg-signal
+           px-5 py-2.5 font-medium text-ink transition
+           hover:bg-signal-dim focus-visible:outline focus-visible:outline-2
+           focus-visible:outline-offset-2 focus-visible:outline-signal;
+  }
+  .btn-ghost {
+    @apply inline-flex items-center justify-center gap-2 rounded-md border
+           border-ink-line px-5 py-2.5 font-medium text-mist transition
+           hover:border-node hover:text-node focus-visible:outline
+           focus-visible:outline-2 focus-visible:outline-offset-2
+           focus-visible:outline-node;
+  }
+
+  .card {
+    @apply rounded-lg border border-ink-line bg-ink-card/60 p-6
+           transition hover:border-node/40;
+  }
+
+  .eyebrow {
+    @apply font-mono text-xs uppercase tracking-[0.2em] text-node;
+  }
+
+  .prose-body {
+    @apply text-mist leading-relaxed;
+  }
+}
+
+@keyframes pulse-node {
+  0% { box-shadow: 0 0 0 0 rgba(45, 212, 191, 0.55); }
+  70% { box-shadow: 0 0 0 10px rgba(45, 212, 191, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(45, 212, 191, 0); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .status-dot { animation: none; }
+  * { scroll-behavior: auto !important; }
+}

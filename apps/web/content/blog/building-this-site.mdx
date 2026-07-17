@@ -1,0 +1,58 @@
+---
+title: "Building this site: Terraform + Ansible + GitHub Actions on Hetzner"
+description: "A walkthrough of how devopsaccess.in is provisioned, configured and deployed — entirely as code, from an empty Hetzner project to a live site behind Cloudflare."
+pubDate: 2026-06-18
+tags: ["terraform", "ansible", "hetzner", "ci-cd"]
+readingTime: "9 min"
+---
+
+A DevOps agency hosted on a drag-and-drop website builder is a contradiction. So this site is the opposite: a small, real piece of infrastructure that's provisioned, configured and deployed entirely as code. This post is the tour.
+
+## The shape of it
+
+Three layers, each owning one job:
+
+- **Terraform** creates the server, firewall and SSH key on Hetzner.
+- **Ansible** turns a bare Ubuntu box into a hardened web server.
+- **GitHub Actions** orchestrates both — infra on manual dispatch, the site on every push.
+
+Cloudflare sits in front for TLS, CDN and WAF. The origin presents a Cloudflare Origin certificate so the edge can run in Full (Strict) mode.
+
+## Why split infra and deploy into two workflows
+
+Provisioning is destructive and costs money; deploying a static site is cheap and frequent. Running them on the same trigger is asking for an accidental `terraform destroy` on a typo. So:
+
+- `infra.yml` runs only on `workflow_dispatch`, with an `apply` / `destroy` choice.
+- `deploy.yml` runs on push to `main` when anything under `site/` changes.
+
+State lives as a GitHub Actions artifact between runs. That's deliberately simple — single operator, low change rate. The moment a second person touches this, it moves to a real remote backend.
+
+## The SSH-port flip that bites everyone
+
+The hardening role moves SSH off port 22. The catch: Ansible is *connected* on 22 when it does this. Restart sshd and the playbook loses its own connection mid-run.
+
+The fix is to restart, then tell Ansible to reconnect on the new port for the rest of the play:
+
+```yaml
+- name: Flush handlers so sshd restarts now
+  ansible.builtin.meta: flush_handlers
+
+- name: Switch connection to the new port
+  ansible.builtin.set_fact:
+    ansible_port: "{{ ssh_port }}"
+
+- name: Wait for SSH on the new port
+  ansible.builtin.wait_for_connection:
+    delay: 3
+    timeout: 60
+```
+
+## Secrets
+
+Nothing sensitive lives in the repo. The Hetzner API token, the SSH private key, and the Cloudflare Origin cert + key are all GitHub secrets, passed to Terraform and Ansible at runtime. The Ansible tasks that write the cert use `no_log: true` so the key never lands in a log.
+
+## What I'd change at scale
+
+This is right-sized for one operator and a static site. With a team I'd move Terraform state to object storage with locking, add a plan/apply approval gate, and put the deploy behind an environment protection rule. But shipping the simple version first — and writing it down — beats designing for a scale you don't have yet.
+
+If you want the role-by-role breakdown, the next posts go deeper on the Nginx + Cloudflare Origin setup and on fail2ban.

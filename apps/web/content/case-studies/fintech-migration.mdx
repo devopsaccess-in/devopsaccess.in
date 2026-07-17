@@ -1,0 +1,23 @@
+---
+client: "Fintech payments company"
+sector: "Fintech"
+challenge: "Production ran on hand-configured VMs with a single person who understood the setup. Needed to move to GCP with zero downtime and full reproducibility."
+stack: ["GCP", "Terraform", "Kubernetes", "Cloud SQL"]
+result: "Zero-downtime cutover, infra fully under version control"
+pubDate: 2026-03-15
+---
+
+## The situation
+
+A payments company can't afford downtime, and this one was carrying two risks at once: production lived on hand-tuned VMs that existed nowhere as code, and exactly one engineer fully understood how it fit together. A big-bang migration was out of the question — and so was the status quo.
+
+## What we did
+
+- **Mapped the dependencies.** Before touching anything, we documented the real topology — services, data flows, the hardcoded assumptions hiding in config.
+- **Built the target as code.** A Terraform landing zone on GCP recreated the environment reproducibly: GKE for the services, Cloud SQL for the data, networking and IAM defined in version control.
+- **Dual-ran with replication.** The new environment ran in parallel with continuous data replication, validated against production traffic patterns before carrying any real load.
+- **Shifted traffic on a dial.** We moved traffic 1% → 10% → 50% → 100% with bake time and clean metrics at each step, keeping a one-command path back the entire time.
+
+## The result
+
+The cutover completed with **zero downtime** and no customer-visible impact. The company came out the other side with its entire infrastructure under version control, documented, and no longer dependent on a single person's memory — which, for a payments business, was as valuable as the migration itself.
