@@ -1,0 +1,67 @@
+---
+# ===========================================================================
+# deploy_site — copies the Astro build output (dist/) into the Nginx webroot.
+#
+# The CI job builds the site and the dist/ folder is made available to Ansible
+# at {{ site_dist_local }} (default: ../site/dist relative to the playbook).
+# On a fresh provision this role also drops a guaranteed "Hello World" page so
+# the server is verifiably serving content even before the real site exists.
+# ===========================================================================
+
+- name: Check whether a built dist/ directory exists locally
+  ansible.builtin.stat:
+    path: "{{ site_dist_local }}"
+  delegate_to: localhost
+  become: false
+  register: dist_dir
+
+- name: Synchronize built site to webroot
+  ansible.posix.synchronize:
+    src: "{{ site_dist_local }}/"
+    dest: "{{ site_webroot }}/"
+    delete: true
+    recursive: true
+    rsync_opts:
+      - "--chmod=D755,F644"
+  when: dist_dir.stat.exists and dist_dir.stat.isdir
+  notify: Reload nginx
+
+# Fallback Hello World — only used if no build was provided. Guarantees the
+# infra-provision workflow produces a visibly working server.
+- name: Deploy fallback Hello World page
+  ansible.builtin.copy:
+    dest: "{{ site_webroot }}/index.html"
+    mode: "0644"
+    content: |
+      <!doctype html>
+      <html lang="en">
+      <head>
+        <meta charset="utf-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1" />
+        <title>devopsaccess.in</title>
+        <style>
+          body { font-family: system-ui, sans-serif; background:#0b1120; color:#e2e8f0;
+                 display:grid; place-items:center; height:100vh; margin:0; }
+          .card { text-align:center; }
+          h1 { font-size:2.5rem; margin:0 0 .5rem; }
+          p { color:#94a3b8; }
+          code { background:#1e293b; padding:.2rem .5rem; border-radius:.3rem; }
+        </style>
+      </head>
+      <body>
+        <div class="card">
+          <h1>Hello World 👋</h1>
+          <p>devopsaccess.in is live on Hetzner — provisioned with Terraform & Ansible.</p>
+          <p><code>nginx</code> · <code>Cloudflare Origin TLS</code> · <code>fail2ban</code></p>
+        </div>
+      </body>
+      </html>
+  when: not (dist_dir.stat.exists and dist_dir.stat.isdir)
+  notify: Reload nginx
+
+- name: Fix webroot ownership
+  ansible.builtin.file:
+    path: "{{ site_webroot }}"
+    owner: "{{ deploy_user }}"
+    group: www-data
+    recurse: true

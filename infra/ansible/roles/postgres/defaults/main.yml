@@ -1,0 +1,9 @@
+---
+# Database for the contact service (waitlist + payments). Postgres listens on
+# localhost only (Ubuntu default); only the contact service connects to it.
+db_name: devopsaccess
+db_user: app
+# db_password is supplied via CI secrets (--extra-vars), no default.
+
+postgres_backup_dir: /opt/backups
+postgres_backup_keep_days: 7

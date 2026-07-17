@@ -1,0 +1,12 @@
+---
+# Order matters: rebuild the hashed map before restarting Postfix. Ansible runs
+# handlers in the order they're defined here.
+- name: Rebuild postfix sasl map
+  ansible.builtin.command: postmap /etc/postfix/sasl_passwd
+  no_log: true
+  notify: Restart postfix
+
+- name: Restart postfix
+  ansible.builtin.systemd_service:
+    name: postfix
+    state: restarted

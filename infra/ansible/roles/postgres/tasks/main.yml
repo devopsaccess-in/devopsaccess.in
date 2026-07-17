@@ -1,0 +1,76 @@
+---
+# ===========================================================================
+# postgres — self-hosted PostgreSQL on the box for the contact service's
+# waitlist + payments tables. Listens on localhost only (Ubuntu default), so
+# nothing is exposed to the network. Daily pg_dump backup via a systemd timer.
+# ===========================================================================
+
+- name: Assert database password is provided
+  ansible.builtin.assert:
+    that:
+      - db_password is defined and db_password | length > 0
+    fail_msg: "db_password must be supplied (via CI secret POSTGRES_PASSWORD / --extra-vars)."
+
+- name: Install PostgreSQL and Python driver
+  ansible.builtin.apt:
+    name:
+      - postgresql
+      - python3-psycopg2
+    state: present
+    update_cache: true
+
+- name: Ensure PostgreSQL is running and enabled
+  ansible.builtin.service:
+    name: postgresql
+    state: started
+    enabled: true
+
+- name: Create application database role
+  community.postgresql.postgresql_user:
+    name: "{{ db_user }}"
+    password: "{{ db_password }}"
+  become: true
+  become_user: postgres
+  no_log: true
+
+- name: Create application database
+  community.postgresql.postgresql_db:
+    name: "{{ db_name }}"
+    owner: "{{ db_user }}"
+  become: true
+  become_user: postgres
+
+# --- Daily backup -----------------------------------------------------------
+- name: Create backup directory
+  ansible.builtin.file:
+    path: "{{ postgres_backup_dir }}"
+    state: directory
+    owner: postgres
+    group: postgres
+    mode: "0750"
+
+- name: Install backup script
+  ansible.builtin.template:
+    src: pg-backup.sh.j2
+    dest: /usr/local/bin/pg-backup.sh
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Install backup systemd service and timer
+  ansible.builtin.template:
+    src: "{{ item }}.j2"
+    dest: "/etc/systemd/system/{{ item }}"
+    owner: root
+    group: root
+    mode: "0644"
+  loop:
+    - pg-backup.service
+    - pg-backup.timer
+
+- name: Enable daily backup timer
+  ansible.builtin.systemd_service:
+    name: pg-backup.timer
+    enabled: true
+    state: started
+    daemon_reload: true

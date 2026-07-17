@@ -1,0 +1,23 @@
+# Managed by Ansible (mail_relay role). Send-only smarthost to Gmail over IPv4.
+compatibility_level = 3.6
+smtpd_banner = $myhostname ESMTP
+biff = no
+append_dot_mydomain = no
+readme_directory = no
+
+myhostname = {{ mail_relay_origin }}
+myorigin = {{ mail_relay_origin }}
+mydestination = localhost
+mynetworks = 127.0.0.0/8
+inet_interfaces = loopback-only
+# The fix: Hetzner's IPv6 path to Gmail SMTP times out — force IPv4.
+inet_protocols = ipv4
+
+# Smarthost relay with SASL auth + TLS to Gmail.
+relayhost = [{{ mail_relay_host }}]:{{ mail_relay_port }}
+smtp_sasl_auth_enable = yes
+smtp_sasl_password_maps = hash:/etc/postfix/sasl_passwd
+smtp_sasl_security_options = noanonymous
+smtp_sasl_tls_security_options = noanonymous
+smtp_tls_security_level = encrypt
+smtp_tls_CAfile = /etc/ssl/certs/ca-certificates.crt

@@ -1,0 +1,56 @@
+---
+# ===========================================================================
+# mail_relay — Postfix as a send-only smarthost to Gmail, forced over IPv4.
+# Listens on localhost only; Grafana and the contact service relay through it
+# unauthenticated, so the Gmail app password lives in exactly one place.
+# ===========================================================================
+
+- name: Assert SMTP credentials are provided
+  ansible.builtin.assert:
+    that:
+      - smtp_user is defined and smtp_user | length > 0
+      - smtp_pass is defined and smtp_pass | length > 0
+    fail_msg: "smtp_user and smtp_pass must be supplied (CI secrets SMTP_USER/SMTP_PASS)."
+
+- name: Preseed postfix debconf (non-interactive install)
+  ansible.builtin.debconf:
+    name: postfix
+    question: "{{ item.q }}"
+    vtype: "{{ item.t }}"
+    value: "{{ item.v }}"
+  loop:
+    - { q: "postfix/main_mailer_type", t: "select", v: "Internet Site" }
+    - { q: "postfix/mailname", t: "string", v: "{{ mail_relay_origin }}" }
+
+- name: Install Postfix and SASL modules
+  ansible.builtin.apt:
+    name:
+      - postfix
+      - libsasl2-modules
+    state: present
+    update_cache: true
+
+- name: Configure Postfix (send-only, IPv4 smarthost)
+  ansible.builtin.template:
+    src: main.cf.j2
+    dest: /etc/postfix/main.cf
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Restart postfix
+
+- name: Install Gmail relay credentials
+  ansible.builtin.template:
+    src: sasl_passwd.j2
+    dest: /etc/postfix/sasl_passwd
+    owner: root
+    group: root
+    mode: "0600"
+  no_log: true
+  notify: Rebuild postfix sasl map
+
+- name: Ensure Postfix is enabled and running
+  ansible.builtin.systemd_service:
+    name: postfix
+    enabled: true
+    state: started

@@ -1,0 +1,29 @@
+[DEFAULT]
+# Ban for 1 hour after 5 failures within 10 minutes
+bantime  = 1h
+findtime = 10m
+maxretry = 5
+backend  = systemd
+# Never ban localhost
+ignoreip = 127.0.0.1/8 ::1
+
+[sshd]
+enabled  = true
+port     = {{ ssh_port }}
+filter   = sshd
+logpath  = %(sshd_log)s
+maxretry = 3
+bantime  = 2h
+
+[nginx-http-auth]
+enabled = true
+port    = http,https
+filter  = nginx-http-auth
+logpath = /var/log/nginx/error.log
+
+[nginx-botsearch]
+enabled = true
+port    = http,https
+filter  = nginx-botsearch
+logpath = /var/log/nginx/access.log
+maxretry = 10

@@ -1,0 +1,235 @@
+---
+# ===========================================================================
+# monitoring — node_exporter + Prometheus + Grafana, all on the box. Exporters
+# and Prometheus bind to localhost; only Grafana is exposed (behind its own
+# login) via nginx at {{ grafana_domain }}, which already sits behind Cloudflare.
+# ===========================================================================
+
+- name: Assert Grafana admin password is provided
+  ansible.builtin.assert:
+    that:
+      - grafana_admin_password is defined and grafana_admin_password | length > 0
+    fail_msg: "grafana_admin_password must be supplied (CI secret GRAFANA_ADMIN_PASSWORD / --extra-vars)."
+
+# --- Prometheus + node_exporter (Ubuntu universe) --------------------------
+- name: Install Prometheus and node_exporter
+  ansible.builtin.apt:
+    name:
+      - prometheus
+      - prometheus-node-exporter
+    state: present
+    update_cache: true
+
+- name: Bind node_exporter to localhost
+  ansible.builtin.copy:
+    dest: /etc/default/prometheus-node-exporter
+    mode: "0644"
+    content: |
+      ARGS="--web.listen-address=127.0.0.1:9100"
+  notify: Restart node_exporter
+
+- name: Bind Prometheus to localhost and set retention
+  ansible.builtin.copy:
+    dest: /etc/default/prometheus
+    mode: "0644"
+    content: |
+      ARGS="--web.listen-address=127.0.0.1:9090 --storage.tsdb.retention.time={{ prometheus_retention }}"
+  notify: Restart prometheus
+
+- name: Configure Prometheus scrape targets
+  ansible.builtin.template:
+    src: prometheus.yml.j2
+    dest: /etc/prometheus/prometheus.yml
+    mode: "0644"
+  notify: Restart prometheus
+
+- name: Enable Prometheus and node_exporter
+  ansible.builtin.systemd_service:
+    name: "{{ item }}"
+    enabled: true
+    state: started
+  loop:
+    - prometheus
+    - prometheus-node-exporter
+
+# --- nginx log exporter (request rates + status codes) ---------------------
+- name: Create nginxlog exporter user
+  ansible.builtin.user:
+    name: nginxlog
+    system: true
+    create_home: false
+    shell: /usr/sbin/nologin
+
+- name: Install nginx log exporter binary
+  ansible.builtin.unarchive:
+    src: "https://github.com/martin-helmich/prometheus-nginxlog-exporter/releases/download/v{{ nginxlog_exporter_version }}/prometheus-nginxlog-exporter_{{ nginxlog_exporter_version }}_linux_amd64.tar.gz"
+    dest: /usr/local/bin
+    remote_src: true
+    include:
+      - prometheus-nginxlog-exporter
+    mode: "0755"
+    owner: root
+    group: root
+    creates: /usr/local/bin/prometheus-nginxlog-exporter
+  notify: Restart nginxlog exporter
+
+- name: Configure nginx log exporter
+  ansible.builtin.template:
+    src: prometheus-nginxlog-exporter.hcl.j2
+    dest: /etc/prometheus-nginxlog-exporter.hcl
+    mode: "0644"
+  notify: Restart nginxlog exporter
+
+- name: Install nginx log exporter systemd unit
+  ansible.builtin.template:
+    src: prometheus-nginxlog-exporter.service.j2
+    dest: /etc/systemd/system/prometheus-nginxlog-exporter.service
+    mode: "0644"
+  notify: Restart nginxlog exporter
+
+- name: Enable nginx log exporter
+  ansible.builtin.systemd_service:
+    name: prometheus-nginxlog-exporter
+    enabled: true
+    state: started
+    daemon_reload: true
+
+# --- Grafana (official apt repo) -------------------------------------------
+- name: Ensure apt keyring directory
+  ansible.builtin.file:
+    path: /etc/apt/keyrings
+    state: directory
+    mode: "0755"
+
+- name: Add Grafana apt signing key
+  ansible.builtin.get_url:
+    url: https://apt.grafana.com/gpg.key
+    dest: /etc/apt/keyrings/grafana.asc
+    mode: "0644"
+
+- name: Add Grafana apt repository
+  ansible.builtin.apt_repository:
+    repo: "deb [signed-by=/etc/apt/keyrings/grafana.asc] https://apt.grafana.com stable main"
+    filename: grafana
+    state: present
+    update_cache: true
+
+- name: Install Grafana
+  ansible.builtin.apt:
+    name: grafana
+    state: present
+
+- name: Configure Grafana
+  ansible.builtin.template:
+    src: grafana.ini.j2
+    dest: /etc/grafana/grafana.ini
+    owner: root
+    group: grafana
+    mode: "0640"
+  no_log: true
+  notify: Restart grafana
+
+- name: Provision Grafana Prometheus datasource
+  ansible.builtin.template:
+    src: datasource.yml.j2
+    dest: /etc/grafana/provisioning/datasources/prometheus.yml
+    owner: root
+    group: grafana
+    mode: "0640"
+  notify: Restart grafana
+
+- name: Provision Grafana dashboard provider
+  ansible.builtin.copy:
+    dest: /etc/grafana/provisioning/dashboards/default.yml
+    owner: root
+    group: grafana
+    mode: "0640"
+    content: |
+      apiVersion: 1
+      providers:
+        - name: default
+          type: file
+          allowUiUpdates: true
+          options:
+            path: /var/lib/grafana/dashboards
+  notify: Restart grafana
+
+- name: Create dashboards directory
+  ansible.builtin.file:
+    path: /var/lib/grafana/dashboards
+    state: directory
+    owner: grafana
+    group: grafana
+    mode: "0755"
+
+- name: Install starter dashboards
+  ansible.builtin.copy:
+    src: "{{ item }}"
+    dest: "/var/lib/grafana/dashboards/{{ item }}"
+    owner: grafana
+    group: grafana
+    mode: "0644"
+  loop:
+    - node-dashboard.json
+    - nginx-dashboard.json
+  notify: Restart grafana
+
+- name: Ensure Grafana alerting provisioning directory
+  ansible.builtin.file:
+    path: /etc/grafana/provisioning/alerting
+    state: directory
+    owner: root
+    group: grafana
+    mode: "0750"
+
+- name: Provision alert contact point (email)
+  ansible.builtin.template:
+    src: alerting-contactpoints.yaml.j2
+    dest: /etc/grafana/provisioning/alerting/contactpoints.yaml
+    owner: root
+    group: grafana
+    mode: "0640"
+  notify: Restart grafana
+
+- name: Provision alert notification policy
+  ansible.builtin.copy:
+    src: alerting-policies.yaml
+    dest: /etc/grafana/provisioning/alerting/policies.yaml
+    owner: root
+    group: grafana
+    mode: "0640"
+  notify: Restart grafana
+
+- name: Provision alert rules (5xx rate, node down)
+  ansible.builtin.copy:
+    src: alerting-rules.yaml
+    dest: /etc/grafana/provisioning/alerting/rules.yaml
+    owner: root
+    group: grafana
+    mode: "0640"
+  notify: Restart grafana
+
+- name: Enable Grafana
+  ansible.builtin.systemd_service:
+    name: grafana-server
+    enabled: true
+    state: started
+
+# --- nginx vhost for Grafana ------------------------------------------------
+- name: Deploy Grafana nginx vhost
+  ansible.builtin.template:
+    src: grafana.vhost.conf.j2
+    dest: /etc/nginx/sites-available/grafana.conf
+    mode: "0644"
+  notify: Reload nginx (monitoring)
+
+- name: Enable Grafana nginx vhost
+  ansible.builtin.file:
+    src: /etc/nginx/sites-available/grafana.conf
+    dest: /etc/nginx/sites-enabled/grafana.conf
+    state: link
+  notify: Reload nginx (monitoring)
+
+- name: Validate nginx configuration
+  ansible.builtin.command: nginx -t
+  changed_when: false

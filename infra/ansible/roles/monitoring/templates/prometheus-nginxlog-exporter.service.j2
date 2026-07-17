@@ -1,0 +1,21 @@
+[Unit]
+Description=Prometheus nginx log exporter
+After=network-online.target nginx.service
+Wants=network-online.target
+
+[Service]
+# Runs as the unprivileged nginxlog user with group adm so it can read the
+# nginx access log (root:adm 0640) and nothing else.
+User=nginxlog
+Group=adm
+ExecStart=/usr/local/bin/prometheus-nginxlog-exporter /etc/prometheus-nginxlog-exporter.hcl
+Restart=on-failure
+RestartSec=3
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+RestrictAddressFamilies=AF_INET AF_INET6
+
+[Install]
+WantedBy=multi-user.target

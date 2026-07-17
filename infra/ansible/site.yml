@@ -1,0 +1,50 @@
+---
+# ===========================================================================
+# devopsaccess.in — server configuration playbook
+#
+# Run order matters:
+#   1. common         — base packages, deploy user, system hardening basics
+#   2. ssh_hardening  — move SSH port, disable root/password login
+#   3. fail2ban       — brute-force protection (separate role as requested)
+#   4. nginx          — install Nginx + TLS (Cloudflare Origin cert)
+#   5. postgres       — local Postgres for waitlist + payments
+#   6. mail_relay     — Postfix send-only smarthost to Gmail over IPv4 (localhost:25)
+#   7. contact_api    — Go contact/waitlist/payment relay behind nginx /api/
+#   8. monitoring     — node_exporter + Prometheus + Grafana (grafana subdomain)
+#   9. deploy_site    — copy the built Astro dist/ into the webroot
+#
+# IMPORTANT: ssh_hardening changes the SSH port mid-play. The play starts on
+# port 22 (fresh server) and the hardening role flips connection to the new
+# port for subsequent roles. See the role for the reconnect handling.
+# ===========================================================================
+
+- name: Configure devopsaccess web server
+  hosts: web
+  become: true
+  gather_facts: true
+
+  vars:
+    deploy_user: deploy
+    ssh_port: 2222
+    site_webroot: /var/www/devopsaccess
+    server_name: "devopsaccess.in"
+
+  roles:
+    - role: common
+      tags: [common]
+    - role: ssh_hardening
+      tags: [ssh]
+    - role: fail2ban
+      tags: [fail2ban]
+    - role: nginx
+      tags: [nginx]
+    - role: postgres
+      tags: [postgres, contact]
+    - role: mail_relay
+      tags: [mail, contact, monitoring]
+    - role: contact_api
+      tags: [contact]
+    - role: monitoring
+      tags: [monitoring]
+    - role: deploy_site
+      tags: [deploy]

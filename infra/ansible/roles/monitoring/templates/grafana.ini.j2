@@ -1,0 +1,31 @@
+[server]
+http_addr = 127.0.0.1
+http_port = 3000
+domain = {{ grafana_domain }}
+root_url = https://{{ grafana_domain }}/
+enforce_domain = false
+
+[security]
+admin_user = admin
+admin_password = {{ grafana_admin_password }}
+cookie_secure = true
+disable_gravatar = true
+
+[users]
+allow_sign_up = false
+allow_org_create = false
+
+[auth.anonymous]
+enabled = false
+
+[analytics]
+reporting_enabled = false
+check_for_updates = false
+[smtp]
+# Sends through the local Postfix relay (mail_relay role) on 127.0.0.1:25, which
+# forwards to Gmail over IPv4. No auth here — Postfix authenticates to Gmail.
+enabled = true
+host = 127.0.0.1:25
+from_address = {{ smtp_user | default(alert_email) }}
+from_name = devopsaccess Grafana
+skip_verify = true

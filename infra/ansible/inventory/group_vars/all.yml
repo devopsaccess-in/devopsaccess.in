@@ -1,0 +1,5 @@
+---
+# Local path (relative to ansible.cfg working dir) to the built Next.js export.
+# CI builds into apps/web/out, and runs ansible from infra/ansible/, so the
+# relative path back up is ../../apps/web/out.
+site_dist_local: "../../apps/web/out"

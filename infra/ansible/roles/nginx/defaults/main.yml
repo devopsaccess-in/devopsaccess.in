@@ -1,0 +1,19 @@
+---
+# Authenticated Origin Pulls (mTLS) — fail-safe, two-stage rollout:
+#
+#   nginx_aop_enabled: true   -> MONITOR mode. nginx requests + validates
+#       Cloudflare's client cert but never rejects (ssl_verify_client optional),
+#       so the site can't go down. Check the result via the `X-AOP-Verify`
+#       response header — it should read SUCCESS for real Cloudflare traffic.
+#
+#   nginx_aop_enforce: true   -> ENFORCE mode (only meaningful with enabled).
+#       Rejects (403) anything that isn't a valid Cloudflare cert. Flip this on
+#       ONLY after you've confirmed X-AOP-Verify: SUCCESS in monitor mode and
+#       Cloudflare → SSL/TLS → Origin Server → Authenticated Origin Pulls is ON.
+nginx_aop_enabled: false
+nginx_aop_enforce: false
+
+# Content-Security-Policy rollout. false => Report-Only (logs violations, never
+# blocks). Set true to ENFORCE — only after confirming zero CSP violations in
+# the browser console across all flows (Calendly, Razorpay, analytics).
+nginx_csp_enforce: false

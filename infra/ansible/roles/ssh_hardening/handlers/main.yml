@@ -1,0 +1,11 @@
+---
+# Ubuntu 24.04 socket-activates sshd; ssh.service then ignores sshd_config's Port
+# directive. Disable the socket and enable the service so it binds the configured
+# port. Backgrounded (async/poll:0) because the restart drops our SSH session.
+- name: Restart sshd
+  ansible.builtin.shell: |
+    systemctl disable --now ssh.socket || true
+    systemctl enable ssh.service
+    systemctl restart ssh.service
+  async: 45
+  poll: 0
