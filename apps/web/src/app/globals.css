@@ -73,6 +73,23 @@
   .prose-body {
     @apply text-mist leading-relaxed;
   }
+
+  /* Legal-page typography (LegalPage component). */
+  .legal h2 {
+    @apply mt-10 text-xl font-semibold text-white;
+  }
+  .legal h3 {
+    @apply mt-6 text-base font-semibold text-mist;
+  }
+  .legal p {
+    @apply mt-3 leading-relaxed text-mist;
+  }
+  .legal ul {
+    @apply mt-3 list-disc space-y-1 pl-6 text-mist;
+  }
+  .legal a {
+    @apply text-node hover:underline;
+  }
 }
 
 @keyframes pulse-node {
