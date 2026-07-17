@@ -1,0 +1,19 @@
+---
+# Where the uptime API listens (localhost only; nginx proxies /api/ on the
+# app.devopsaccess.in vhost to it — keep in sync with nginx api_proxy_port).
+api_listen_addr: "127.0.0.1:8081"
+
+# Auth0: auth0_domain has no default (asserted); the audience matches the
+# Auth0 API identifier.
+auth0_audience: "https://api.devopsaccess.in"
+
+# Alert sender (channel-test endpoint) via the local Postfix relay.
+alert_from: "alerts@devopsaccess.in"
+
+# Uptime DB connection — role names/db from the postgres role defaults;
+# uptime_db_password comes from the UPTIME_DB_PASSWORD CI secret.
+uptime_db_name: uptime
+uptime_api_db_user: uptime_api
+
+# Path to the pre-built linux/amd64 binary on the control node (built in CI).
+api_binary_src: "{{ playbook_dir }}/roles/app_api/files/uptime-api"

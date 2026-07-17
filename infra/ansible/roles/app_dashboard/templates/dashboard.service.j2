@@ -1,0 +1,29 @@
+[Unit]
+Description=devopsaccess uptime dashboard (Next.js)
+After=network-online.target uptime-api.service
+Wants=network-online.target
+
+[Service]
+User=dashboard
+Group=dashboard
+EnvironmentFile=/opt/dashboard/dashboard.env
+WorkingDirectory=/opt/dashboard/{{ dashboard_server_rel | dirname }}
+ExecStart=/usr/bin/node /opt/dashboard/{{ dashboard_server_rel }}
+Restart=on-failure
+RestartSec=3
+
+# Hardening — read-only filesystem except the Next fetch/ISR cache.
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectControlGroups=true
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+ReadWritePaths=/opt/dashboard/{{ dashboard_server_rel | dirname }}/.next/cache
+CapabilityBoundingSet=
+AmbientCapabilities=
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,6 @@
+---
+- name: Restart uptime-scheduler
+  ansible.builtin.systemd_service:
+    name: uptime-scheduler
+    state: restarted
+    daemon_reload: true

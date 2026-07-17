@@ -1,0 +1,19 @@
+---
+# Next.js dashboard (standalone output) served by node on localhost; nginx
+# proxies / on the app.devopsaccess.in vhost to it.
+dashboard_port: 3001
+app_base_url: "https://app.devopsaccess.in"
+auth0_audience: "https://api.devopsaccess.in"
+api_internal_url: "http://127.0.0.1:8081"
+
+# NodeSource major version installed on the box (Next 16 needs >= 20).
+dashboard_node_major: 22
+
+# Path (relative to the standalone root) of server.js. In a pnpm monorepo the
+# standalone tree nests the app (apps/dashboard/server.js); CI discovers the
+# real path and passes it as an extra-var.
+dashboard_server_rel: "server.js"
+
+# The CI-built standalone tree on the control node (.next/standalone with
+# .next/static already copied in).
+dashboard_dist_local: "{{ playbook_dir }}/roles/app_dashboard/files/dashboard"

@@ -12,6 +12,9 @@
 #   7. contact_api    — Go contact/waitlist/payment relay behind nginx /api/
 #   8. monitoring     — node_exporter + Prometheus + Grafana (grafana subdomain)
 #   9. deploy_site    — copy the built Astro dist/ into the webroot
+#  10. app_api        — uptime control-plane API (app.devopsaccess.in /api/)
+#  11. app_scheduler  — uptime prober + alerter (no listener)
+#  12. app_dashboard  — Next.js dashboard (node, app.devopsaccess.in /)
 #
 # IMPORTANT: ssh_hardening changes the SSH port mid-play. The play starts on
 # port 22 (fresh server) and the hardening role flips connection to the new
@@ -39,7 +42,7 @@
     - role: nginx
       tags: [nginx]
     - role: postgres
-      tags: [postgres, contact]
+      tags: [postgres, contact, app]
     - role: mail_relay
       tags: [mail, contact, monitoring]
     - role: contact_api
@@ -48,3 +51,9 @@
       tags: [monitoring]
     - role: deploy_site
       tags: [deploy]
+    - role: app_api
+      tags: [app, app_api]
+    - role: app_scheduler
+      tags: [app, app_scheduler]
+    - role: app_dashboard
+      tags: [app, app_dashboard]

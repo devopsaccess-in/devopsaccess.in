@@ -1,0 +1,83 @@
+---
+# ===========================================================================
+# app_scheduler — deploys the Go uptime prober/alerter as a hardened systemd
+# service. No listener: it polls Postgres for due monitors, probes customer
+# URLs (SSRF-guarded), and sends email/Slack alerts. The binary is
+# cross-compiled in CI (GOOS=linux GOARCH=amd64).
+# ===========================================================================
+
+- name: Assert required scheduler secrets are provided
+  ansible.builtin.assert:
+    that:
+      - uptime_db_password is defined and uptime_db_password | length > 0
+    fail_msg: "uptime_db_password must be supplied (via CI secrets / --extra-vars)."
+
+- name: Ensure the pre-built uptime-scheduler binary exists on the control node
+  ansible.builtin.stat:
+    path: "{{ scheduler_binary_src }}"
+  delegate_to: localhost
+  become: false
+  register: scheduler_bin
+
+- name: Fail clearly if the binary was not built
+  ansible.builtin.fail:
+    msg: >-
+      {{ scheduler_binary_src }} not found. Build it first:
+      GOOS=linux GOARCH=amd64 go build -o infra/ansible/roles/app_scheduler/files/uptime-scheduler ./services/scheduler
+  when: not scheduler_bin.stat.exists
+
+- name: Create uptime-scheduler system group
+  ansible.builtin.group:
+    name: uptime-scheduler
+    system: true
+
+- name: Create uptime-scheduler system user
+  ansible.builtin.user:
+    name: uptime-scheduler
+    group: uptime-scheduler
+    system: true
+    shell: /usr/sbin/nologin
+    create_home: false
+
+- name: Create /opt/uptime-scheduler
+  ansible.builtin.file:
+    path: /opt/uptime-scheduler
+    state: directory
+    owner: root
+    group: uptime-scheduler
+    mode: "0750"
+
+- name: Install uptime-scheduler binary
+  ansible.builtin.copy:
+    src: "{{ scheduler_binary_src }}"
+    dest: /opt/uptime-scheduler/uptime-scheduler
+    owner: root
+    group: uptime-scheduler
+    mode: "0755"
+  notify: Restart uptime-scheduler
+
+- name: Install uptime-scheduler environment file
+  ansible.builtin.template:
+    src: uptime-scheduler.env.j2
+    dest: /opt/uptime-scheduler/uptime-scheduler.env
+    owner: uptime-scheduler
+    group: uptime-scheduler
+    mode: "0600"
+  no_log: true
+  notify: Restart uptime-scheduler
+
+- name: Install uptime-scheduler systemd unit
+  ansible.builtin.template:
+    src: uptime-scheduler.service.j2
+    dest: /etc/systemd/system/uptime-scheduler.service
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Restart uptime-scheduler
+
+- name: Enable and start uptime-scheduler service
+  ansible.builtin.systemd_service:
+    name: uptime-scheduler
+    enabled: true
+    state: started
+    daemon_reload: true

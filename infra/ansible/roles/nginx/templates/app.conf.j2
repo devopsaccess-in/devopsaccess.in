@@ -1,0 +1,83 @@
+# ===========================================================================
+# app.devopsaccess.in — the uptime SaaS (dashboard + API), behind Cloudflare
+# (Full Strict). TLS terminates here with the Cloudflare Origin certificate —
+# the same wildcard cert as the apex (must cover *.devopsaccess.in).
+#   /api/  -> Go control-plane API   (127.0.0.1:{{ api_proxy_port }})
+#   /      -> Next.js dashboard      (127.0.0.1:{{ dashboard_port }})
+# ===========================================================================
+
+# Redirect HTTP -> HTTPS
+server {
+    listen 80;
+    listen [::]:80;
+    server_name {{ app_server_name }};
+    return 301 https://{{ app_server_name }}$request_uri;
+}
+
+server {
+    # http2 as a listen parameter — Ubuntu 24.04 ships nginx 1.24.0, which does
+    # not support the standalone `http2 on;` directive (added in 1.25.1).
+    listen 443 ssl http2;
+    listen [::]:443 ssl http2;
+    server_name {{ app_server_name }};
+
+    ssl_certificate     /etc/nginx/tls/origin.pem;
+    ssl_certificate_key /etc/nginx/tls/origin.key;
+
+    ssl_protocols       TLSv1.2 TLSv1.3;
+    ssl_ciphers         HIGH:!aNULL:!MD5;
+    ssl_prefer_server_ciphers off;
+
+    # Authenticated Origin Pulls — same two-stage rollout as site.conf.j2.
+{% if nginx_aop_enabled | default(false) %}
+    ssl_client_certificate /etc/nginx/tls/cloudflare-origin-pull-ca.pem;
+    ssl_verify_client optional;
+    add_header X-AOP-Verify $ssl_client_verify always;
+{% if nginx_aop_enforce | default(false) %}
+    if ($ssl_client_verify != SUCCESS) { return 403; }
+{% endif %}
+{% endif %}
+
+    # Security headers. No CSP yet: the dashboard is a Next.js runtime app
+    # with inline hydration scripts; add one deliberately later, not as a
+    # copy of the marketing site's.
+    add_header X-Content-Type-Options "nosniff" always;
+    add_header X-Frame-Options "SAMEORIGIN" always;
+    add_header Referrer-Policy "strict-origin-when-cross-origin" always;
+    add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
+    add_header Permissions-Policy "geolocation=(), camera=(), microphone=(), browsing-topics=()" always;
+
+    # Control-plane API (Go, localhost-bound).
+    location /api/ {
+        proxy_pass http://127.0.0.1:{{ api_proxy_port }};
+        proxy_set_header Host $host;
+        # Real visitor IP: behind Cloudflare $remote_addr is a CF edge IP, so use
+        # CF-Connecting-IP. Safe because the firewall only admits Cloudflare.
+        proxy_set_header X-Real-IP $http_cf_connecting_ip;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_read_timeout 35s;
+    }
+
+    # Next.js dashboard (node server, localhost-bound). Includes /auth/* —
+    # the Auth0 SDK routes live in the Next app.
+    location / {
+        proxy_pass http://127.0.0.1:{{ dashboard_port }};
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $http_cf_connecting_ip;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_read_timeout 30s;
+    }
+
+    # Hashed build assets — safe to cache hard at the edge.
+    location /_next/static/ {
+        proxy_pass http://127.0.0.1:{{ dashboard_port }};
+        proxy_set_header Host $host;
+        expires 1y;
+        add_header Cache-Control "public, immutable";
+    }
+
+    access_log /var/log/nginx/app.access.log;
+    error_log  /var/log/nginx/app.error.log;
+}
