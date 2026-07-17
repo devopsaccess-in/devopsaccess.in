@@ -1,0 +1,179 @@
+name: Deploy Web
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "apps/web/**"
+      - "infra/ansible/roles/deploy_site/**"
+      - ".github/workflows/deploy-web.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-web
+  cancel-in-progress: true
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # ---------------- Build Next.js (static export) ----------------
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build site
+        working-directory: apps/web
+        env:
+          # NEXT_PUBLIC_ vars are inlined at build time. PostHog only loads
+          # client-side after the visitor accepts; absent key => analytics no-op.
+          NEXT_PUBLIC_POSTHOG_KEY: ${{ secrets.POSTHOG_KEY }}
+          NEXT_PUBLIC_POSTHOG_HOST: ${{ secrets.POSTHOG_HOST }}
+          # Razorpay Payment Link URL (public, off-site). Absent => CTA falls back to /contact.
+          NEXT_PUBLIC_RAZORPAY_PAYMENT_URL: ${{ vars.RAZORPAY_PAYMENT_URL }}
+          # Cloudflare Turnstile site key (public). Absent => forms submit without a widget.
+          NEXT_PUBLIC_TURNSTILE_SITEKEY: ${{ vars.TURNSTILE_SITEKEY }}
+          # GA4 Measurement ID (public). Absent => GA4 not loaded.
+          NEXT_PUBLIC_GA4_ID: ${{ vars.GA4_ID }}
+        run: pnpm build
+
+      # ---------------- Resolve server IP/port from Terraform state ----------------
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.9.5"
+
+      - name: Terraform Init
+        working-directory: infra/terraform
+        env:
+          TF_TOKEN_app_terraform_io: ${{ secrets.TF_CLOUD_TOKEN }}
+        run: terraform init
+
+      - name: Read server IP and SSH port
+        id: tf
+        working-directory: infra/terraform
+        env:
+          TF_TOKEN_app_terraform_io: ${{ secrets.TF_CLOUD_TOKEN }}
+        run: |
+          IP="$(terraform output -raw server_ipv4 2>/dev/null || true)"
+          PORT="$(terraform output -raw ssh_port 2>/dev/null || true)"
+          if [ -z "${IP}" ]; then
+            echo "::error::No server IP in Terraform state. Run the 'Provision Infrastructure' workflow first."
+            exit 1
+          fi
+          echo "ip=${IP}" >> "$GITHUB_OUTPUT"
+          echo "port=${PORT:-2222}" >> "$GITHUB_OUTPUT"
+
+      # ---------------- Deploy via Ansible ----------------
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install Ansible
+        run: pip install ansible
+
+      - name: Install Ansible collections
+        working-directory: infra/ansible
+        run: ansible-galaxy collection install -r requirements.yml
+
+      - name: Write SSH key and inventory
+        working-directory: infra/ansible
+        env:
+          SERVER_IP: ${{ steps.tf.outputs.ip }}
+          SSH_PORT: ${{ steps.tf.outputs.port }}
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.HETZNER_SSH_KEY }}" > ~/.ssh/hetzner
+          chmod 600 ~/.ssh/hetzner
+          cat > inventory/hosts.ini <<EOF
+          [web]
+          ${SERVER_IP} ansible_user=deploy ansible_ssh_private_key_file=~/.ssh/hetzner ansible_port=${SSH_PORT:-2222}
+          EOF
+
+      - name: Guard — verify server is reachable on SSH
+        env:
+          SERVER_IP: ${{ steps.tf.outputs.ip }}
+          SSH_PORT: ${{ steps.tf.outputs.port }}
+        run: |
+          PORT="${SSH_PORT:-2222}"
+
+          if [ -z "${SERVER_IP}" ]; then
+            echo "::error::No server IP resolved from Terraform state. Run the 'Provision Infrastructure' workflow first."
+            exit 1
+          fi
+
+          echo "Checking ${SERVER_IP}:${PORT} ..."
+
+          reachable=false
+          for i in $(seq 1 6); do
+            if nc -z -w5 "${SERVER_IP}" "${PORT}"; then
+              reachable=true
+              break
+            fi
+            echo "  attempt $i/6: not reachable yet, retrying in 10s..."
+            sleep 10
+          done
+
+          if [ "${reachable}" != "true" ]; then
+            echo "::error::Cannot reach ${SERVER_IP}:${PORT}. The server may be down, destroyed, or the port stale. Re-provision, then re-run."
+            exit 1
+          fi
+
+          if ssh -o BatchMode=yes -o StrictHostKeyChecking=no -o ConnectTimeout=10 \
+                 -i ~/.ssh/hetzner -p "${PORT}" "deploy@${SERVER_IP}" 'echo ok' 2>/dev/null | grep -q ok; then
+            echo "Server reachable and SSH auth OK."
+          else
+            echo "::error::Port ${PORT} is open but SSH auth as 'deploy' failed. Check HETZNER_SSH_KEY matches the key authorized on the server."
+            exit 1
+          fi
+
+      - name: Deploy site (deploy_site role only)
+        working-directory: infra/ansible
+        env:
+          ANSIBLE_HOST_KEY_CHECKING: "False"
+        run: |
+          ansible-playbook site.yml --tags deploy \
+            --extra-vars "origin_cert='unused' origin_key='unused'"
+
+      # Purge the Cloudflare cache so the new build is served immediately.
+      # Skips quietly if the credentials aren't set.
+      - name: Purge Cloudflare cache
+        env:
+          CF_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CF_ZONE_ID: ${{ secrets.CLOUDFLARE_ZONE_ID }}
+        run: |
+          if [ -z "$CF_API_TOKEN" ] || [ -z "$CF_ZONE_ID" ]; then
+            echo "::warning::CLOUDFLARE_API_TOKEN / CLOUDFLARE_ZONE_ID not set — skipping cache purge."
+            exit 0
+          fi
+          resp=$(curl -sS -X POST "https://api.cloudflare.com/client/v4/zones/${CF_ZONE_ID}/purge_cache" \
+            -H "Authorization: Bearer ${CF_API_TOKEN}" \
+            -H "Content-Type: application/json" \
+            --data '{"purge_everything":true}')
+          if echo "$resp" | grep -q '"success":true'; then
+            echo "Cloudflare cache purged."
+          else
+            echo "::error::Cache purge failed: $resp"
+            exit 1
+          fi
+
+      - name: Summary
+        run: |
+          echo "### Site deployed :white_check_mark:" >> "$GITHUB_STEP_SUMMARY"
+          echo "Commit ${GITHUB_SHA::7} pushed to https://devopsaccess.in" >> "$GITHUB_STEP_SUMMARY"

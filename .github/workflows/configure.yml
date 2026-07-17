@@ -1,0 +1,122 @@
+name: Configure Server
+
+# Apply config changes to the EXISTING server without rebuilding it. Connects as
+# deploy@<ssh_port> (which exists on the hardened box) with sudo, and runs only
+# the selected roles via --tags. Never destroys, so the server keeps its IP —
+# safe to use after the production cutover.
+on:
+  workflow_dispatch:
+    inputs:
+      tags:
+        description: "Ansible role tags to run (comma-separated: nginx, postgres, contact, fail2ban, deploy)"
+        required: true
+        default: "nginx"
+      csp_enforce:
+        description: "Enforce Content-Security-Policy (else report-only). Only true after confirming zero console violations. Run with tags=nginx."
+        required: false
+        type: choice
+        default: "false"
+        options:
+          - "false"
+          - "true"
+      extra_vars:
+        description: "Optional extra vars, e.g. nginx_aop_enabled=true"
+        required: false
+        default: ""
+
+concurrency:
+  group: infra
+  cancel-in-progress: false
+
+jobs:
+  configure:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.9.5"
+
+      - name: Terraform Init
+        working-directory: infra/terraform
+        env:
+          TF_TOKEN_app_terraform_io: ${{ secrets.TF_CLOUD_TOKEN }}
+        run: terraform init
+
+      - name: Read server IP and SSH port
+        id: tf
+        working-directory: infra/terraform
+        env:
+          TF_TOKEN_app_terraform_io: ${{ secrets.TF_CLOUD_TOKEN }}
+        run: |
+          IP="$(terraform output -raw server_ipv4 2>/dev/null || true)"
+          PORT="$(terraform output -raw ssh_port 2>/dev/null || true)"
+          if [ -z "${IP}" ]; then
+            echo "::error::No server IP in Terraform state. Provision the server first."
+            exit 1
+          fi
+          echo "ip=${IP}" >> "$GITHUB_OUTPUT"
+          echo "port=${PORT:-2222}" >> "$GITHUB_OUTPUT"
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install Ansible
+        run: pip install ansible
+
+      - name: Install Ansible collections
+        working-directory: infra/ansible
+        run: ansible-galaxy collection install -r requirements.yml
+
+      # Build the contact binary so the `contact` tag works; harmless otherwise.
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.25"
+
+      - name: Build contact service (linux/amd64)
+        working-directory: services/contact
+        run: GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -o "$GITHUB_WORKSPACE/infra/ansible/roles/contact_api/files/contact" .
+
+      - name: Write inventory and SSH key (deploy user, hardened port)
+        working-directory: infra/ansible
+        env:
+          SERVER_IP: ${{ steps.tf.outputs.ip }}
+          SSH_PORT: ${{ steps.tf.outputs.port }}
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.HETZNER_SSH_KEY }}" > ~/.ssh/hetzner
+          chmod 600 ~/.ssh/hetzner
+          cat > inventory/hosts.ini <<INVENTORY
+          [web]
+          ${SERVER_IP} ansible_user=deploy ansible_ssh_private_key_file=~/.ssh/hetzner ansible_port=${SSH_PORT}
+          INVENTORY
+
+      - name: Apply selected roles (no rebuild)
+        working-directory: infra/ansible
+        env:
+          ANSIBLE_HOST_KEY_CHECKING: "False"
+          SMTP_USER: ${{ secrets.SMTP_USER }}
+          SMTP_PASS: ${{ secrets.SMTP_PASS }}
+          DB_PASSWORD: ${{ secrets.POSTGRES_PASSWORD }}
+          RAZORPAY_WEBHOOK_SECRET: ${{ secrets.RAZORPAY_WEBHOOK_SECRET }}
+          TURNSTILE_SECRET: ${{ secrets.TURNSTILE_SECRET }}
+          GRAFANA_ADMIN_PASSWORD: ${{ secrets.GRAFANA_ADMIN_PASSWORD }}
+        run: |
+          ansible-playbook site.yml \
+            --tags "${{ github.event.inputs.tags }}" \
+            --extra-vars "origin_cert='${{ secrets.CLOUDFLARE_ORIGIN_CERT }}'" \
+            --extra-vars "origin_key='${{ secrets.CLOUDFLARE_ORIGIN_KEY }}'" \
+            --extra-vars "smtp_user=$SMTP_USER" \
+            --extra-vars "smtp_pass=$SMTP_PASS" \
+            --extra-vars "db_password=$DB_PASSWORD" \
+            --extra-vars "razorpay_webhook_secret=$RAZORPAY_WEBHOOK_SECRET" \
+            --extra-vars "turnstile_secret=$TURNSTILE_SECRET" \
+            --extra-vars "grafana_admin_password=$GRAFANA_ADMIN_PASSWORD" \
+            --extra-vars "nginx_csp_enforce=${{ github.event.inputs.csp_enforce }}" \
+            ${{ github.event.inputs.extra_vars != '' && format('--extra-vars "{0}"', github.event.inputs.extra_vars) || '' }}

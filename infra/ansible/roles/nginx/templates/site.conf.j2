@@ -86,8 +86,8 @@ server {
         try_files $uri $uri/ $uri.html =404;
     }
 
-    # Long cache for hashed assets
-    location /_astro/ {
+    # Long cache for hashed assets (Next.js static export)
+    location /_next/static/ {
         expires 1y;
         add_header Cache-Control "public, immutable";
     }
