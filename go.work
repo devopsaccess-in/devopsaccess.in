@@ -2,6 +2,8 @@ go 1.25.0
 
 // Add each module here as it gains a go.mod (services/api, services/scheduler, ...).
 use (
+	./services/api
 	./services/contact
+	./services/scheduler
 	./services/shared
 )
