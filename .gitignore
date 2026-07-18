@@ -17,6 +17,9 @@ Thumbs.db
 *.pem
 *.key
 *.crt
+# Exception: Cloudflare's Authenticated Origin Pull CA is a PUBLIC cert
+# (published by Cloudflare), pinned in the repo and required by the nginx role.
+!infra/ansible/roles/nginx/files/cloudflare-origin-pull-ca.pem
 id_rsa
 id_ed25519
 
