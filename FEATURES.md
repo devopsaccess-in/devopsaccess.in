@@ -1,0 +1,45 @@
+# Feature inventory
+
+The single list of what DevOps Access ships. **Every PR that adds, changes, or
+removes user-facing behaviour updates this file AND the E2E coverage in
+[`e2e/`](e2e/README.md)** — the PR template has a checkbox for it, and
+`.github/workflows/e2e.yml` runs the suite on every PR.
+
+Coverage legend: **E2E** = automated in `e2e/` (test name given) · **unit** =
+covered by package tests · **manual** = part of the pre-launch manual gate in
+`docs/HANDOFF-uptime-mvp.md` (needs real Auth0/DNS/Cloudflare).
+
+## Uptime monitoring (the MVP product — app.devopsaccess.in)
+
+| Feature | Status | Coverage |
+|---|---|---|
+| Signup via Auth0; user + personal tenant auto-provisioned on first login (unique slug from email) | built | E2E `TestSignupProvisioning` · manual (real Auth0 login) |
+| Multi-tenant isolation: cross-tenant reads/writes indistinguishable from 404, Postgres RLS + app-layer scoping | built | E2E `TestTenantIsolation` · integration `TestTenantIsolationRLS` (`-tags integration`) |
+| HTTP(S) monitors: CRUD, GET/HEAD, 60–300s interval, expected status, failure threshold 1–10, pause/resume | built | E2E `TestMonitorValidation`, `TestIncidentPipeline` · unit (field validation) |
+| SSRF-guarded probing and URL validation (public IPs only, ports 80/443, DNS-rebinding safe) | built | unit `TestValidateMonitorURL` · code: `safehttp` dialer re-checks at connect time |
+| Prober: due-monitor claiming (`SKIP LOCKED`), worker pool, per-monitor timeout, results history | built | E2E `TestIncidentPipeline` |
+| Incident state machine: unknown/up/down, threshold crossing opens exactly one incident, first success resolves | built | unit `TestEvaluate` · E2E `TestIncidentPipeline` |
+| Alert channels: email + Slack webhook, per-channel test send | built | E2E `TestIncidentPipeline` |
+| Down + recovery notifications (restart-safe via `notify_state`, IST timestamps) | built | E2E `TestIncidentPipeline` |
+| Uptime % and check-result windows (`24h`/`7d`/`30d`) | built | E2E `TestIncidentPipeline` · unit `TestParseWindow` |
+| Public status page — opt-in per tenant (off by default; `PATCH /api/settings` + Settings toggle) | built | E2E `TestIncidentPipeline` (404-before-opt-in) |
+| Public status page — API (`/api/status/{slug}`), no URL/cause leakage | built | E2E `TestIncidentPipeline` |
+| Public status page — dashboard UI (`/status/{slug}`) | built | E2E `TestDashboardStatusPage` |
+| Dashboard (authed): monitors list + sparklines, monitor detail + latency chart, incidents, channels, settings | built | manual (needs real Auth0) — pre-launch gate |
+| 30-day results retention (nightly purge) | built | code-reviewed; no automated test (startup purge logged) |
+| Billing: manual Razorpay payment link | decided, not built | — |
+
+## Marketing site (devopsaccess.in) + contact service
+
+| Feature | Status | Coverage |
+|---|---|---|
+| Next.js 16 static site, 19 pages, URL parity with the old Astro site | built (Phase A) | build-time checks in deploy-web.yml; PSI/CLS manual gate |
+| Contact / site-check / waitlist forms → Go contact service (Turnstile, rate limits) | live | unit tests in `services/contact` |
+| Razorpay payment webhook recording | live | unit tests in `services/contact` |
+
+## Explicitly cut from v1 (do not build — see handoff §cut list)
+
+Deploy engine, OTel/APM ingestor, gRPC/protos, CLI, multi-region probes,
+Razorpay subscription automation, SMS/voice paging, on-call schedules,
+non-HTTP check types, team invites, custom status domains, Hindi UI,
+k3s/ArgoCD, Kafka/NATS/Redis.

@@ -102,6 +102,10 @@ DevOps Access is a unified DevOps lifecycle SaaS platform that replaces fragment
 - Integration tests required for: auth flows, payment flows, tenant isolation, alert delivery
 - E2E (Playwright) required for: signup, first deploy, first alert, payment
 - Coverage is not a goal; meaningful tests are. Don't test framework code.
+- `FEATURES.md` (repo root) is the product feature inventory. Every PR that
+  adds/changes/removes user-facing behaviour MUST update it AND the black-box
+  suite in `e2e/` (`go test -tags e2e ./e2e`) — CI enforces the suite on every
+  PR via `.github/workflows/e2e.yml`; the PR template has the checkboxes.
 
 ## Non-Goals (Don't Suggest These)
 

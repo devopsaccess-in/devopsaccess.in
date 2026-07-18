@@ -17,6 +17,9 @@ Thumbs.db
 *.pem
 *.key
 *.crt
+# Exception: Cloudflare's Authenticated Origin Pull CA is a PUBLIC cert
+# (published by Cloudflare), pinned in the repo and required by the nginx role.
+!infra/ansible/roles/nginx/files/cloudflare-origin-pull-ca.pem
 id_rsa
 id_ed25519
 
@@ -48,6 +51,16 @@ yarn-error.log*
 *.out
 vendor/
 bin/
+
+# Local `go build` outputs (CI builds with -o into role files dirs)
+services/api/api
+services/scheduler/scheduler
+
+# CI-built deploy artifacts (binaries + dashboard standalone tree)
+infra/ansible/roles/contact_api/files/contact
+infra/ansible/roles/app_api/files/uptime-api
+infra/ansible/roles/app_scheduler/files/uptime-scheduler
+infra/ansible/roles/app_dashboard/files/dashboard/
 
 # Terraform
 *.tfstate

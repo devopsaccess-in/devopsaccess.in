@@ -81,6 +81,20 @@
     state: link
   notify: Reload nginx
 
+- name: Deploy app vhost (app.devopsaccess.in — uptime dashboard + API)
+  ansible.builtin.template:
+    src: app.conf.j2
+    dest: /etc/nginx/sites-available/app.devopsaccess.conf
+    mode: "0644"
+  notify: Reload nginx
+
+- name: Enable app vhost
+  ansible.builtin.file:
+    src: /etc/nginx/sites-available/app.devopsaccess.conf
+    dest: /etc/nginx/sites-enabled/app.devopsaccess.conf
+    state: link
+  notify: Reload nginx
+
 - name: Validate nginx configuration
   ansible.builtin.command: nginx -t
   changed_when: false

@@ -7,3 +7,13 @@ db_user: app
 
 postgres_backup_dir: /opt/backups
 postgres_backup_keep_days: 7
+
+# Uptime product database (services/api + services/scheduler). Two roles:
+# uptime_api is RLS-enforced and owns the schema (migrations run at API
+# startup); uptime_scheduler has BYPASSRLS — the prober works across all
+# tenants by design. uptime_db_password comes from the UPTIME_DB_PASSWORD CI
+# secret; when unset the uptime tasks are skipped so contact-only configure
+# runs keep working.
+uptime_db_name: uptime
+uptime_api_db_user: uptime_api
+uptime_scheduler_db_user: uptime_scheduler

@@ -40,6 +40,35 @@
   become: true
   become_user: postgres
 
+# --- Uptime product database (services/api + services/scheduler) ------------
+# Skipped entirely until the UPTIME_DB_PASSWORD secret is supplied.
+- name: Create uptime API database role (RLS enforced)
+  community.postgresql.postgresql_user:
+    name: "{{ uptime_api_db_user }}"
+    password: "{{ uptime_db_password }}"
+  become: true
+  become_user: postgres
+  no_log: true
+  when: uptime_db_password | default('') | length > 0
+
+- name: Create uptime scheduler database role (BYPASSRLS — cross-tenant prober)
+  community.postgresql.postgresql_user:
+    name: "{{ uptime_scheduler_db_user }}"
+    password: "{{ uptime_db_password }}"
+    role_attr_flags: BYPASSRLS
+  become: true
+  become_user: postgres
+  no_log: true
+  when: uptime_db_password | default('') | length > 0
+
+- name: Create uptime database (owned by uptime_api, which runs migrations)
+  community.postgresql.postgresql_db:
+    name: "{{ uptime_db_name }}"
+    owner: "{{ uptime_api_db_user }}"
+  become: true
+  become_user: postgres
+  when: uptime_db_password | default('') | length > 0
+
 # --- Daily backup -----------------------------------------------------------
 - name: Create backup directory
   ansible.builtin.file:

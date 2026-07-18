@@ -1,0 +1,224 @@
+name: Deploy App
+
+# Deploys the uptime SaaS (app.devopsaccess.in): Go API + scheduler binaries
+# and the Next.js dashboard, plus the postgres/nginx config they need.
+#
+# Required secrets beyond the deploy-web set: UPTIME_DB_PASSWORD,
+# AUTH0_DOMAIN, AUTH0_CLIENT_ID, AUTH0_CLIENT_SECRET, AUTH0_SECRET.
+# DNS: the `app` A record (proxied) is added manually in the Cloudflare
+# dashboard, like the apex and grafana records.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "services/api/**"
+      - "services/scheduler/**"
+      - "services/shared/**"
+      - "apps/dashboard/**"
+      - "infra/ansible/roles/app_api/**"
+      - "infra/ansible/roles/app_scheduler/**"
+      - "infra/ansible/roles/app_dashboard/**"
+      - ".github/workflows/deploy-app.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-app
+  cancel-in-progress: true
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # ---------------- Build Go services (linux/amd64 — the VM is amd64) ----------------
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.25"
+
+      - name: Build uptime API
+        working-directory: services/api
+        run: GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -o "$GITHUB_WORKSPACE/infra/ansible/roles/app_api/files/uptime-api" .
+
+      - name: Build uptime scheduler
+        working-directory: services/scheduler
+        run: GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -o "$GITHUB_WORKSPACE/infra/ansible/roles/app_scheduler/files/uptime-scheduler" .
+
+      - name: Run Go tests
+        run: |
+          (cd services/api && go test ./...)
+          (cd services/scheduler && go test ./...)
+
+      # ---------------- Build Next.js dashboard (standalone) ----------------
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build dashboard
+        working-directory: apps/dashboard
+        env:
+          # Build-time placeholders only — the runtime env file on the server
+          # (dashboard.env, from Ansible) carries the real values.
+          AUTH0_SECRET: build-placeholder-secret-32-chars!
+          AUTH0_DOMAIN: placeholder.auth0.com
+          AUTH0_CLIENT_ID: placeholder
+          AUTH0_CLIENT_SECRET: placeholder
+          APP_BASE_URL: https://app.devopsaccess.in
+        run: pnpm build
+
+      # Assemble the deployable tree: the standalone output plus .next/static
+      # next to server.js. In a pnpm monorepo the standalone tree nests the app
+      # (apps/dashboard/server.js) — discover the real path and hand it to
+      # Ansible so the systemd unit points at the right file.
+      - name: Assemble dashboard standalone tree
+        id: dashboard
+        working-directory: apps/dashboard
+        run: |
+          SERVER_REL="$(cd .next/standalone && find . -maxdepth 3 -name server.js | head -1 | sed 's|^\./||')"
+          if [ -z "$SERVER_REL" ]; then
+            echo "::error::server.js not found in .next/standalone — did the build produce standalone output?"
+            exit 1
+          fi
+          echo "server_rel=$SERVER_REL" >> "$GITHUB_OUTPUT"
+          SERVER_DIR=".next/standalone/$(dirname "$SERVER_REL")"
+          mkdir -p "$SERVER_DIR/.next"
+          cp -r .next/static "$SERVER_DIR/.next/static"
+          DEST="$GITHUB_WORKSPACE/infra/ansible/roles/app_dashboard/files/dashboard"
+          mkdir -p "$DEST"
+          cp -a .next/standalone/. "$DEST/"
+          echo "server.js at: $SERVER_REL"
+
+      # ---------------- Resolve server IP/port from Terraform state ----------------
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.9.5"
+
+      - name: Terraform Init
+        working-directory: infra/terraform
+        env:
+          TF_TOKEN_app_terraform_io: ${{ secrets.TF_CLOUD_TOKEN }}
+        run: terraform init
+
+      - name: Read server IP and SSH port
+        id: tf
+        working-directory: infra/terraform
+        env:
+          TF_TOKEN_app_terraform_io: ${{ secrets.TF_CLOUD_TOKEN }}
+        run: |
+          IP="$(terraform output -raw server_ipv4 2>/dev/null || true)"
+          PORT="$(terraform output -raw ssh_port 2>/dev/null || true)"
+          if [ -z "${IP}" ]; then
+            echo "::error::No server IP in Terraform state. Run the 'Provision Infrastructure' workflow first."
+            exit 1
+          fi
+          echo "ip=${IP}" >> "$GITHUB_OUTPUT"
+          echo "port=${PORT:-2222}" >> "$GITHUB_OUTPUT"
+
+      # ---------------- Deploy via Ansible ----------------
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install Ansible
+        run: pip install ansible
+
+      - name: Install Ansible collections
+        working-directory: infra/ansible
+        run: ansible-galaxy collection install -r requirements.yml
+
+      - name: Write SSH key and inventory
+        working-directory: infra/ansible
+        env:
+          SERVER_IP: ${{ steps.tf.outputs.ip }}
+          SSH_PORT: ${{ steps.tf.outputs.port }}
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.HETZNER_SSH_KEY }}" > ~/.ssh/hetzner
+          chmod 600 ~/.ssh/hetzner
+          cat > inventory/hosts.ini <<EOF
+          [web]
+          ${SERVER_IP} ansible_user=deploy ansible_ssh_private_key_file=~/.ssh/hetzner ansible_port=${SSH_PORT:-2222}
+          EOF
+
+      - name: Guard — verify server is reachable on SSH
+        env:
+          SERVER_IP: ${{ steps.tf.outputs.ip }}
+          SSH_PORT: ${{ steps.tf.outputs.port }}
+        run: |
+          PORT="${SSH_PORT:-2222}"
+          echo "Checking ${SERVER_IP}:${PORT} ..."
+          reachable=false
+          for i in $(seq 1 6); do
+            if nc -z -w5 "${SERVER_IP}" "${PORT}"; then
+              reachable=true
+              break
+            fi
+            echo "  attempt $i/6: not reachable yet, retrying in 10s..."
+            sleep 10
+          done
+          if [ "${reachable}" != "true" ]; then
+            echo "::error::Cannot reach ${SERVER_IP}:${PORT}. The server may be down, destroyed, or the port stale."
+            exit 1
+          fi
+          if ssh -o BatchMode=yes -o StrictHostKeyChecking=no -o ConnectTimeout=10 \
+                 -i ~/.ssh/hetzner -p "${PORT}" "deploy@${SERVER_IP}" 'echo ok' 2>/dev/null | grep -q ok; then
+            echo "Server reachable and SSH auth OK."
+          else
+            echo "::error::Port ${PORT} is open but SSH auth as 'deploy' failed. Check HETZNER_SSH_KEY."
+            exit 1
+          fi
+
+      # nginx runs too so the app vhost stays current; postgres creates the
+      # uptime DB + roles before the services start.
+      - name: Deploy app (postgres, nginx, app roles)
+        working-directory: infra/ansible
+        env:
+          ANSIBLE_HOST_KEY_CHECKING: "False"
+          DB_PASSWORD: ${{ secrets.POSTGRES_PASSWORD }}
+          UPTIME_DB_PASSWORD: ${{ secrets.UPTIME_DB_PASSWORD }}
+          AUTH0_DOMAIN: ${{ secrets.AUTH0_DOMAIN }}
+          AUTH0_CLIENT_ID: ${{ secrets.AUTH0_CLIENT_ID }}
+          AUTH0_CLIENT_SECRET: ${{ secrets.AUTH0_CLIENT_SECRET }}
+          AUTH0_SECRET: ${{ secrets.AUTH0_SECRET }}
+        run: |
+          ansible-playbook site.yml --tags "postgres,nginx,app" \
+            --extra-vars "origin_cert='${{ secrets.CLOUDFLARE_ORIGIN_CERT }}'" \
+            --extra-vars "origin_key='${{ secrets.CLOUDFLARE_ORIGIN_KEY }}'" \
+            --extra-vars "db_password=$DB_PASSWORD" \
+            --extra-vars "uptime_db_password=$UPTIME_DB_PASSWORD" \
+            --extra-vars "auth0_domain=$AUTH0_DOMAIN" \
+            --extra-vars "auth0_client_id=$AUTH0_CLIENT_ID" \
+            --extra-vars "auth0_client_secret=$AUTH0_CLIENT_SECRET" \
+            --extra-vars "auth0_session_secret=$AUTH0_SECRET" \
+            --extra-vars "dashboard_server_rel=${{ steps.dashboard.outputs.server_rel }}"
+
+      - name: Smoke check — API healthz through the vhost
+        env:
+          SERVER_IP: ${{ steps.tf.outputs.ip }}
+          SSH_PORT: ${{ steps.tf.outputs.port }}
+        run: |
+          ssh -o BatchMode=yes -o StrictHostKeyChecking=no -i ~/.ssh/hetzner \
+              -p "${SSH_PORT:-2222}" "deploy@${SERVER_IP}" \
+              'curl -sf http://127.0.0.1:8081/healthz && echo && curl -so /dev/null -w "dashboard: %{http_code}\n" http://127.0.0.1:3001/status/does-not-exist'
+
+      - name: Summary
+        run: |
+          echo "### App deployed :white_check_mark:" >> "$GITHUB_STEP_SUMMARY"
+          echo "Commit ${GITHUB_SHA::7} live at https://app.devopsaccess.in" >> "$GITHUB_STEP_SUMMARY"

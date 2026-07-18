@@ -1,0 +1,27 @@
+[Unit]
+Description=devopsaccess uptime prober and alerter
+After=network-online.target postgresql.service
+Wants=network-online.target
+
+[Service]
+User=uptime-scheduler
+Group=uptime-scheduler
+EnvironmentFile=/opt/uptime-scheduler/uptime-scheduler.env
+ExecStart=/opt/uptime-scheduler/uptime-scheduler
+Restart=on-failure
+RestartSec=3
+
+# Hardening — the service only needs the network and its env file.
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectControlGroups=true
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+CapabilityBoundingSet=
+AmbientCapabilities=
+
+[Install]
+WantedBy=multi-user.target

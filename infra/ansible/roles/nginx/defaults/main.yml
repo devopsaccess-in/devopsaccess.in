@@ -17,3 +17,9 @@ nginx_aop_enforce: false
 # blocks). Set true to ENFORCE — only after confirming zero CSP violations in
 # the browser console across all flows (Calendly, Razorpay, analytics).
 nginx_csp_enforce: false
+
+# app.devopsaccess.in vhost (uptime dashboard + API). The ports must match the
+# app_api / app_dashboard role defaults.
+app_server_name: "app.devopsaccess.in"
+api_proxy_port: 8081
+dashboard_port: 3001

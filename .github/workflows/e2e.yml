@@ -1,0 +1,107 @@
+name: E2E
+
+# Runs the black-box product suite (e2e/) on every PR and on main: real API +
+# scheduler binaries against Postgres, fake Auth0 (local JWKS), SMTP + Slack
+# sinks, and the dashboard's standalone node server for the public status
+# page. Also runs unit tests + vet across the Go modules and the dashboard
+# typecheck, so a PR gets one green/red signal for the product.
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+    paths:
+      - "services/**"
+      - "apps/dashboard/**"
+      - "e2e/**"
+      - ".github/workflows/e2e.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: e2e-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  e2e:
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.25"
+
+      - name: Unit tests + vet (all Go modules)
+        run: |
+          for m in services/shared services/api services/scheduler services/contact; do
+            echo "--- $m"
+            (cd "$m" && go build ./... && go vet ./... && go test ./...)
+          done
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Typecheck + build dashboard (standalone)
+        working-directory: apps/dashboard
+        env:
+          AUTH0_SECRET: build-placeholder-secret-32-chars!
+          AUTH0_DOMAIN: placeholder.auth0.com
+          AUTH0_CLIENT_ID: placeholder
+          AUTH0_CLIENT_SECRET: placeholder
+          APP_BASE_URL: http://127.0.0.1:3001
+        run: |
+          pnpm typecheck
+          pnpm build
+
+      - name: Assemble dashboard standalone tree
+        id: dashboard
+        working-directory: apps/dashboard
+        run: |
+          SERVER_REL="$(cd .next/standalone && find . -maxdepth 3 -name server.js | head -1 | sed 's|^\./||')"
+          if [ -z "$SERVER_REL" ]; then
+            echo "::error::server.js not found in .next/standalone"
+            exit 1
+          fi
+          SERVER_DIR=".next/standalone/$(dirname "$SERVER_REL")"
+          mkdir -p "$SERVER_DIR/.next"
+          rm -rf "$SERVER_DIR/.next/static"
+          cp -r .next/static "$SERVER_DIR/.next/static"
+          echo "dir=$GITHUB_WORKSPACE/apps/dashboard/$SERVER_DIR" >> "$GITHUB_OUTPUT"
+
+      - name: Run E2E suite
+        env:
+          E2E_ADMIN_DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/postgres?sslmode=disable
+          E2E_DASHBOARD_DIR: ${{ steps.dashboard.outputs.dir }}
+        run: go test -tags e2e -timeout 10m -v ./e2e
+
+      - name: RLS integration test
+        env:
+          DATABASE_URL: postgres://uptime_api:e2e-password@127.0.0.1:5432/uptime_e2e?sslmode=disable
+        run: go test -tags integration -run TestTenantIsolationRLS -v ./services/api
