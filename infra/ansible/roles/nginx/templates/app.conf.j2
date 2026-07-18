@@ -47,6 +47,15 @@ server {
     add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
     add_header Permissions-Policy "geolocation=(), camera=(), microphone=(), browsing-topics=()" always;
 
+    # The Auth0 SDK sets a large encrypted session cookie on /auth/callback,
+    # so the upstream response headers exceed nginx's default 4k/8k proxy
+    # buffers ("upstream sent too big header" -> 502). Enlarge them for this
+    # vhost. proxy_buffer_size sizes the single buffer that must hold the whole
+    # header block (incl. Set-Cookie); the pool covers the rest.
+    proxy_buffer_size 16k;
+    proxy_buffers 8 16k;
+    proxy_busy_buffers_size 32k;
+
     # Control-plane API (Go, localhost-bound).
     location /api/ {
         proxy_pass http://127.0.0.1:{{ api_proxy_port }};
