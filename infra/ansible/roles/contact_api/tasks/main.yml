@@ -1,0 +1,84 @@
+---
+# ===========================================================================
+# contact_api — deploys the Go contact-form relay as a hardened systemd
+# service bound to localhost. nginx reverse-proxies /api/ to it (see the nginx
+# role). The binary is cross-compiled in CI and copied here; Go is never
+# installed on the production box.
+# ===========================================================================
+
+- name: Assert SMTP credentials are provided
+  ansible.builtin.assert:
+    that:
+      - smtp_user is defined and smtp_user | length > 0
+      - smtp_pass is defined and smtp_pass | length > 0
+    fail_msg: "smtp_user and smtp_pass must be supplied (via CI secrets / --extra-vars)."
+
+- name: Ensure the pre-built contact binary exists on the control node
+  ansible.builtin.stat:
+    path: "{{ contact_binary_src }}"
+  delegate_to: localhost
+  become: false
+  register: contact_bin
+
+- name: Fail clearly if the binary was not built
+  ansible.builtin.fail:
+    msg: >-
+      {{ contact_binary_src }} not found. Build it first:
+      GOOS=linux GOARCH=amd64 go build -o infra/ansible/roles/contact_api/files/contact ./services/contact
+  when: not contact_bin.stat.exists
+
+- name: Create contact system group
+  ansible.builtin.group:
+    name: contact
+    system: true
+
+- name: Create contact system user
+  ansible.builtin.user:
+    name: contact
+    group: contact
+    system: true
+    shell: /usr/sbin/nologin
+    create_home: false
+
+- name: Create /opt/contact
+  ansible.builtin.file:
+    path: /opt/contact
+    state: directory
+    owner: root
+    group: contact
+    mode: "0750"
+
+- name: Install contact binary
+  ansible.builtin.copy:
+    src: "{{ contact_binary_src }}"
+    dest: /opt/contact/contact
+    owner: root
+    group: contact
+    mode: "0755"
+  notify: Restart contact
+
+- name: Install contact environment file
+  ansible.builtin.template:
+    src: contact.env.j2
+    dest: /opt/contact/contact.env
+    owner: contact
+    group: contact
+    mode: "0600"
+  no_log: true
+  notify: Restart contact
+
+- name: Install contact systemd unit
+  ansible.builtin.template:
+    src: contact.service.j2
+    dest: /etc/systemd/system/contact.service
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Restart contact
+
+- name: Enable and start contact service
+  ansible.builtin.systemd_service:
+    name: contact
+    enabled: true
+    state: started
+    daemon_reload: true

@@ -1,0 +1,27 @@
+[Unit]
+Description=devopsaccess contact form relay
+After=network-online.target postgresql.service
+Wants=network-online.target
+
+[Service]
+User=contact
+Group=contact
+EnvironmentFile=/opt/contact/contact.env
+ExecStart=/opt/contact/contact
+Restart=on-failure
+RestartSec=3
+
+# Hardening — the service only needs the network and its env file.
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectControlGroups=true
+RestrictAddressFamilies=AF_INET AF_INET6
+CapabilityBoundingSet=
+AmbientCapabilities=
+
+[Install]
+WantedBy=multi-user.target

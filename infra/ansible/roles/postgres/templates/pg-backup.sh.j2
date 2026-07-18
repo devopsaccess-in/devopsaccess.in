@@ -1,0 +1,13 @@
+#!/usr/bin/env bash
+# Daily PostgreSQL backup for {{ db_name }}. Runs as the postgres user.
+set -euo pipefail
+
+BACKUP_DIR="{{ postgres_backup_dir }}"
+KEEP_DAYS="{{ postgres_backup_keep_days }}"
+STAMP="$(date +%Y%m%d-%H%M%S)"
+OUT="${BACKUP_DIR}/{{ db_name }}-${STAMP}.sql.gz"
+
+pg_dump "{{ db_name }}" | gzip > "${OUT}"
+
+# Prune backups older than KEEP_DAYS.
+find "${BACKUP_DIR}" -name '{{ db_name }}-*.sql.gz' -mtime "+${KEEP_DAYS}" -delete

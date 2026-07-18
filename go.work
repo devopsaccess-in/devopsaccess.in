@@ -1,10 +1,4 @@
-go 1.23.3
+go 1.25.0
 
-// Uncomment each module as we create it with `go mod init`
-// use (
-//     ./services/api
-//     ./services/ingestor
-//     ./services/notifier
-//     ./services/scheduler
-//     ./packages/cli
-// )
+// Add each module here as it gains a go.mod (services/api, services/scheduler, ...).
+use ./services/contact

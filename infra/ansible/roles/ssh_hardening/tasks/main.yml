@@ -1,0 +1,46 @@
+---
+# ===========================================================================
+# SSH hardening:
+#   - Move SSH to a non-standard port
+#   - Disable root login
+#   - Disable password authentication (key-only)
+#
+# Connection-flip handling: the first time this runs on a fresh box we are
+# connected on port 22. After we change the port and restart sshd, the rest
+# of the play must use the new port. We use a post-change task that updates
+# ansible_port for the remainder of the play.
+# ===========================================================================
+
+- name: Set sshd configuration (port, root login, password auth)
+  ansible.builtin.copy:
+    dest: /etc/ssh/sshd_config.d/99-hardening.conf
+    mode: "0644"
+    content: |
+      Port {{ ssh_port }}
+      PermitRootLogin no
+      PasswordAuthentication no
+      PubkeyAuthentication yes
+      ChallengeResponseAuthentication no
+      UsePAM yes
+      X11Forwarding no
+      MaxAuthTries 3
+      ClientAliveInterval 300
+      ClientAliveCountMax 2
+      AllowUsers {{ deploy_user }}
+  notify: Restart sshd
+
+- name: Flush handlers so sshd restarts now
+  ansible.builtin.meta: flush_handlers
+
+# Hardening disabled root login and restricted access to AllowUsers deploy, so
+# the rest of the play must reconnect as the deploy user (created by the common
+# role with the same authorized key and NOPASSWD sudo) on the new port.
+- name: Switch ansible connection to the deploy user and new SSH port
+  ansible.builtin.set_fact:
+    ansible_port: "{{ ssh_port }}"
+    ansible_user: "{{ deploy_user }}"
+
+- name: Wait for SSH to come back on the new port
+  ansible.builtin.wait_for_connection:
+    delay: 5
+    timeout: 90

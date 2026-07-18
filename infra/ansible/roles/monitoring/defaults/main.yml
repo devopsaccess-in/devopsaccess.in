@@ -1,0 +1,17 @@
+---
+# Observability stack: node_exporter + Prometheus (both bound to localhost) and
+# Grafana behind its own login, reverse-proxied at grafana_domain via nginx.
+grafana_domain: "grafana.devopsaccess.in"
+prometheus_retention: "15d"
+# grafana_admin_password is supplied from a CI secret (extra-var); asserted below.
+
+# nginx log exporter (request rates + status codes). Bumpable if the release
+# asset 404s. https://github.com/martin-helmich/prometheus-nginxlog-exporter
+nginxlog_exporter_version: "1.11.0"
+nginxlog_listen_port: 4040
+
+# Alerting (Grafana unified alerting → email). Reuses the Workspace SMTP creds
+# (smtp_user / smtp_pass passed from CI). SMTP block is skipped if they're unset.
+smtp_host: "smtp.gmail.com"
+smtp_port: "587"
+alert_email: "support@devopsaccess.in"

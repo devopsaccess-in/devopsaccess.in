@@ -1,0 +1,8 @@
+---
+# Send-only Postfix smarthost relaying to Gmail over IPv4 (Hetzner's IPv6 path
+# to Gmail SMTP times out). Local apps send unauthenticated to 127.0.0.1:25;
+# Postfix holds the Workspace credentials and authenticates to Gmail.
+mail_relay_host: "smtp.gmail.com"
+mail_relay_port: "587"
+mail_relay_origin: "devopsaccess.in"
+# smtp_user / smtp_pass come from CI secrets (extra-vars); asserted in tasks.

@@ -1,0 +1,92 @@
+---
+# ===========================================================================
+# Nginx + TLS using a Cloudflare Origin Certificate.
+#
+# The cert and key are passed in as variables (origin_cert / origin_key),
+# sourced from GitHub secrets CLOUDFLARE_ORIGIN_CERT and CLOUDFLARE_ORIGIN_KEY
+# via the workflow (--extra-vars or env). They are written to disk with
+# strict permissions and never logged (no_log: true).
+# ===========================================================================
+
+- name: Install nginx
+  ansible.builtin.apt:
+    name: nginx
+    state: present
+    update_cache: true
+
+- name: Create webroot directory
+  ansible.builtin.file:
+    path: "{{ site_webroot }}"
+    state: directory
+    owner: "{{ deploy_user }}"
+    group: www-data
+    mode: "0755"
+
+- name: Create TLS directory
+  ansible.builtin.file:
+    path: /etc/nginx/tls
+    state: directory
+    owner: root
+    group: root
+    mode: "0700"
+
+- name: Install Cloudflare Origin certificate
+  ansible.builtin.copy:
+    content: "{{ origin_cert }}"
+    dest: /etc/nginx/tls/origin.pem
+    owner: root
+    group: root
+    mode: "0644"
+  no_log: true
+  notify: Reload nginx
+
+- name: Install Cloudflare Origin private key
+  ansible.builtin.copy:
+    content: "{{ origin_key }}"
+    dest: /etc/nginx/tls/origin.key
+    owner: root
+    group: root
+    mode: "0600"
+  no_log: true
+  notify: Reload nginx
+
+# Cloudflare Authenticated Origin Pull CA — pinned from the repo (the public CA
+# at files/). Used by AOP (ssl_verify_client) when nginx_aop_enabled is true.
+- name: Install Cloudflare Origin Pull CA cert
+  ansible.builtin.copy:
+    src: cloudflare-origin-pull-ca.pem
+    dest: /etc/nginx/tls/cloudflare-origin-pull-ca.pem
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Reload nginx
+
+- name: Remove default nginx site
+  ansible.builtin.file:
+    path: /etc/nginx/sites-enabled/default
+    state: absent
+  notify: Reload nginx
+
+- name: Deploy nginx site config
+  ansible.builtin.template:
+    src: site.conf.j2
+    dest: /etc/nginx/sites-available/devopsaccess.conf
+    mode: "0644"
+  notify: Reload nginx
+
+- name: Enable nginx site
+  ansible.builtin.file:
+    src: /etc/nginx/sites-available/devopsaccess.conf
+    dest: /etc/nginx/sites-enabled/devopsaccess.conf
+    state: link
+  notify: Reload nginx
+
+- name: Validate nginx configuration
+  ansible.builtin.command: nginx -t
+  changed_when: false
+
+- name: Ensure nginx is started and enabled
+  ansible.builtin.service:
+    name: nginx
+    state: started
+    enabled: true

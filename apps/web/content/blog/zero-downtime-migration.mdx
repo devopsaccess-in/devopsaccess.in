@@ -1,0 +1,39 @@
+---
+title: "Zero-downtime cloud migration without the scary weekend"
+description: "Big-bang cutover weekends are where migrations go to die. A pattern for moving production incrementally — dual-running, shifting traffic by percentage, and keeping a one-command path back."
+pubDate: 2026-05-12
+tags: ["migration", "gcp", "reliability"]
+readingTime: "7 min"
+---
+
+The classic migration plan is a heroic weekend: freeze everything Friday, move it all, pray it's up by Monday. It's also where migrations most often fail — because everything changes at once and there's no clean way back.
+
+The alternative is to make the migration boring by making it incremental.
+
+## Dual-run before you cut over
+
+Stand up the new environment alongside the old one and run them in parallel. Replicate data continuously, deploy the same application version to both, and keep them in sync. Nothing is "moved" yet — you've just built a second, validated copy you can point traffic at.
+
+This is the expensive-looking step that saves the project. You get to find the surprises — IAM gaps, networking quirks, a hardcoded endpoint someone forgot — while the old system still carries 100% of traffic.
+
+## Shift traffic by percentage, not by flag
+
+With both environments live, the cutover becomes a dial, not a switch:
+
+- 1% of traffic to the new environment. Watch error rates and latency.
+- 10%, then 50%, with a defined bake time at each step.
+- 100% only once the signals are clean.
+
+If anything looks wrong at any step, you turn the dial back. No rollback drama — just less traffic to the new place.
+
+## Keep the door open
+
+Don't decommission the old environment the moment you hit 100%. Leave it running, in sync, for a defined window. The ability to shift traffic *back* in seconds is what turns a tense cutover into a calm one.
+
+## What makes this possible
+
+- **Reproducible infra.** The new environment is Terraform, not click-ops, so it's identical to what you tested.
+- **Observability on both sides.** You can't shift traffic on confidence; you shift it on metrics.
+- **Data strategy first.** The application layer is usually easy. The data — replication, consistency, the point of no return — is where the real planning goes.
+
+Done this way, the "migration weekend" stops being an event. It's a Tuesday afternoon where a number goes from 99% to 100% and nobody outside the team notices. That's the goal: the best migration is one your users never feel.
