@@ -9,6 +9,7 @@ import type { CheckResult, Incident, Monitor, Uptime } from "@/lib/types";
 import { fmtDuration, fmtPct, fmtTime } from "@/lib/format";
 import { StateBadge } from "@/components/state-badge";
 import { LatencyChart } from "@/components/latency-chart";
+import { EmbedBadge } from "@/components/embed-badge";
 
 function UptimeTile({ id, window: w }: { id: string; window: string }) {
   const uptime = useQuery({
@@ -135,6 +136,8 @@ export default function MonitorDetailPage({ params }: { params: Promise<{ id: st
           ))}
         </ul>
       </div>
+
+      <EmbedBadge monitorId={id} />
 
       <div className="card flex flex-wrap items-center gap-3">
         <button
