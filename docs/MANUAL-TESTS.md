@@ -156,6 +156,47 @@ page **off**, the badge shows a neutral "unavailable" (never real state).
 
 ---
 
+## MT-11 — Deep probe: timings, TLS expiry, failure diagnosis
+**Depends on:** real DNS/TLS against public sites, real certificate chains.
+1. Create a monitor on a real https site you own (or `https://example.com`).
+   Wait for 1–2 checks, open the monitor page.
+2. Look at **Where the time goes** and the **TLS cert** chip next to the state
+   badge.
+3. Create a monitor on `https://expired.badssl.com` (expected status 200) and
+   wait for it to fail its threshold.
+4. Create a monitor on `https://wrong.host.badssl.com` and let it fail too.
+
+**Expected:**
+- (2) a stacked DNS / TCP / TLS / Server bar with per-phase ms and a total; the
+  chip reads e.g. "TLS cert valid 87d" (amber under 14 days, red under 3).
+- (3) the incident cause and the alert email read **"TLS certificate expired N
+  days ago"** — not a generic failure.
+- (4) the cause reads **"TLS certificate does not match the requested
+  hostname"**.
+- No cause anywhere contains the monitor's URL or query string.
+
+**Result:** ⬜ (verified against live example.com + expired.badssl.com from a
+dev machine on 2026-08-02: timings captured, "TLS certificate expired 4128 days
+ago" — re-confirm on prod.)
+
+---
+
+## MT-12 — TLS expiry warning email
+**Depends on:** scheduler cert-expiry pass, real relay, a cert expiring soon.
+1. Point a monitor at an https host whose certificate expires in **under 14
+   days** (e.g. a short-lived staging cert, or `https://expired.badssl.com` for
+   the already-expired path).
+2. Wait for one scheduler tick after the check records the certificate.
+
+**Expected:** one warning email/Slack per rung — "TLS certificate for X expires
+in N days" (or "EXPIRED: …"), naming the issuer and the expiry timestamp in
+IST. Crucially it arrives **once**, not every tick, and not again after a
+restart.
+
+**Result:** ⬜
+
+---
+
 ## MT-9 — Cleanup
 1. Delete the test monitors (health-probe-up, health-probe-down) and the test
    channels.

@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/rs/zerolog"
+
 	"github.com/devopsaccess-in/devopsaccess.in/services/shared/notify"
 )
 
@@ -70,24 +72,8 @@ func (p *prober) notifyOne(ctx context.Context, i pendingIncident) {
 		return
 	}
 
-	attempted, failed := 0, 0
-	for _, c := range channels {
-		attempted++
-		sendCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
-		var sendErr error
-		switch c.typ {
-		case "email":
-			sendErr = p.mailer.Send(sendCtx, c.target, subject, body)
-		case "slack_webhook":
-			sendErr = notify.Slack(sendCtx, p.slackClient, c.target, subject+"\n"+body)
-		}
-		cancel()
-		if sendErr != nil {
-			failed++
-			p.log.Warn().Err(sendErr).Str("incident_id", i.ID).Str("channel_type", c.typ).
-				Msg("notification send failed")
-		}
-	}
+	attempted, failed := p.sendAll(ctx, channels, subject, body,
+		p.log.With().Str("incident_id", i.ID).Logger())
 
 	// Only advance notify_state if there was nothing to deliver or at least
 	// one channel accepted the message; otherwise leave it so the next tick
@@ -121,6 +107,29 @@ func (p *prober) notifyOne(ctx context.Context, i pendingIncident) {
 // whose channels are all failing, so one permanently broken webhook cannot
 // spin every tick forever.
 const notifyRetryWindow = time.Hour
+
+// sendAll delivers one message to every channel, returning how many were
+// attempted and how many failed so callers can decide whether to mark the
+// notification delivered or retry it.
+func (p *prober) sendAll(ctx context.Context, channels []channelTarget, subject, body string, log zerolog.Logger) (attempted, failed int) {
+	for _, c := range channels {
+		attempted++
+		sendCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
+		var sendErr error
+		switch c.typ {
+		case "email":
+			sendErr = p.mailer.Send(sendCtx, c.target, subject, body)
+		case "slack_webhook":
+			sendErr = notify.Slack(sendCtx, p.slackClient, c.target, subject+"\n"+body)
+		}
+		cancel()
+		if sendErr != nil {
+			failed++
+			log.Warn().Err(sendErr).Str("channel_type", c.typ).Msg("notification send failed")
+		}
+	}
+	return attempted, failed
+}
 
 type channelTarget struct {
 	typ    string

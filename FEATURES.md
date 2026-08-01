@@ -18,6 +18,9 @@ covered by package tests · **manual** = part of the pre-launch manual gate in
 | HTTP(S) monitors: CRUD, GET/HEAD, 60–300s interval, expected status, failure threshold 1–10, pause/resume | built | E2E `TestMonitorValidation`, `TestIncidentPipeline` · unit (field validation) |
 | SSRF-guarded probing and URL validation (public IPs only, ports 80/443, DNS-rebinding safe) | built | unit `TestValidateMonitorURL` · code: `safehttp` dialer re-checks at connect time |
 | Prober: due-monitor claiming (`SKIP LOCKED`), worker pool, per-monitor timeout, results history | built | E2E `TestIncidentPipeline` |
+| Deep probe: per-phase timings (DNS / TCP / TLS / server) recorded on every check, shown as a breakdown on the monitor page | built | unit `TestCheckCapturesPhaseTimings` · E2E asserts timings on every result |
+| Failure diagnosis: failures are classified to a phase and a plain-English cause ("TLS certificate expired 2 days ago", "connection refused", "timed out during the TLS handshake") — used in incidents and alerts, never echoes the URL | built | unit `TestDiagnose` (13 cases + URL-leak guard), `TestCheckDiagnoses*` against real servers |
+| TLS certificate tracking: expiry + issuer per monitor, chip on the monitor page, proactive expiry warnings at 14 and 3 days (idempotent, resets on renewal) | built | unit `TestCertRung`, `TestComposeCertAlert`, `TestCheckCapturesTLSCertificate` · manual MT-11 |
 | Incident state machine: unknown/up/down, threshold crossing opens exactly one incident, first success resolves | built | unit `TestEvaluate` · E2E `TestIncidentPipeline` |
 | Alert channels: email + Slack webhook, per-channel test send | built | E2E `TestIncidentPipeline` |
 | Down + recovery notifications (restart-safe via `notify_state`, IST timestamps) | built | E2E `TestIncidentPipeline` |

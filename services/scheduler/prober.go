@@ -2,17 +2,12 @@ package main
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"net/http"
-	"net/url"
-	"time"
 	"unicode/utf8"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/rs/zerolog"
-
-	"github.com/devopsaccess-in/devopsaccess.in/services/shared/safehttp"
 )
 
 // job is a claimed monitor due for a check.
@@ -27,14 +22,6 @@ type job struct {
 	FailureThreshold int
 	State            string
 	ConsecutiveFails int
-}
-
-// checkResult is the observed outcome of one probe.
-type checkResult struct {
-	OK         bool
-	StatusCode *int
-	LatencyMs  int
-	Error      string
 }
 
 // prober claims due monitors, probes them, and applies the state machine.
@@ -86,40 +73,6 @@ func (p *prober) claimDue(ctx context.Context, limit int) ([]job, error) {
 	return jobs, rows.Err()
 }
 
-// check probes the monitor's URL through the SSRF-guarded client. Any
-// transport error or unexpected status is a failure with a short cause.
-func check(ctx context.Context, j job, insecureTargets bool) checkResult {
-	timeout := time.Duration(j.TimeoutMs) * time.Millisecond
-	client := safehttp.Client(timeout)
-	if insecureTargets {
-		client = &http.Client{Timeout: timeout}
-	}
-
-	ctx, cancel := context.WithTimeout(ctx, timeout)
-	defer cancel()
-	req, err := http.NewRequestWithContext(ctx, j.Method, j.URL, nil)
-	if err != nil {
-		return checkResult{Error: "invalid request: " + err.Error()}
-	}
-	req.Header.Set("User-Agent", "DevOpsAccess-Uptime/1.0 (+https://devopsaccess.in)")
-
-	start := time.Now()
-	resp, err := client.Do(req)
-	latency := int(time.Since(start).Milliseconds())
-	if err != nil {
-		return checkResult{LatencyMs: latency, Error: probeErrorMessage(err)}
-	}
-	defer resp.Body.Close()
-
-	res := checkResult{StatusCode: &resp.StatusCode, LatencyMs: latency}
-	if resp.StatusCode == j.ExpectedStatus {
-		res.OK = true
-	} else {
-		res.Error = fmt.Sprintf("expected status %d, got %d", j.ExpectedStatus, resp.StatusCode)
-	}
-	return res
-}
-
 // apply records the result and advances the monitor's state machine in one
 // transaction. Incident notifications happen in the notifier pass, keyed off
 // notify_state, so a crash between commit and send never loses an alert.
@@ -131,9 +84,12 @@ func (p *prober) apply(ctx context.Context, j job, r checkResult) error {
 	defer func() { _ = tx.Rollback(ctx) }()
 
 	if _, err := tx.Exec(ctx, `INSERT INTO monitor_results
-		(monitor_id, tenant_id, ok, status_code, latency_ms, error)
-		VALUES ($1, $2, $3, $4, $5, $6)`,
-		j.ID, j.TenantID, r.OK, r.StatusCode, r.LatencyMs, r.Error); err != nil {
+		(monitor_id, tenant_id, ok, status_code, latency_ms, error,
+		 dns_ms, connect_ms, tls_ms, ttfb_ms, failure_phase)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
+		j.ID, j.TenantID, r.OK, r.StatusCode, r.LatencyMs, r.Error,
+		r.Timings.DNSMs, r.Timings.ConnectMs, r.Timings.TLSMs, r.Timings.TTFBMs,
+		r.FailurePhase); err != nil {
 		return fmt.Errorf("insert result: %w", err)
 	}
 
@@ -142,6 +98,21 @@ func (p *prober) apply(ctx context.Context, j job, r checkResult) error {
 		SET state = $2, consecutive_fails = $3, updated_at = now()
 		WHERE id = $1`, j.ID, tr.NewState, tr.NewFails); err != nil {
 		return fmt.Errorf("update monitor state: %w", err)
+	}
+
+	// Record the observed leaf certificate. A later expiry than we last saw
+	// means the cert was renewed, so the expiry-warning ladder resets.
+	if r.Cert != nil {
+		if _, err := tx.Exec(ctx, `UPDATE monitors
+			SET tls_expires_at = $2,
+			    tls_issuer = $3,
+			    tls_warned_threshold = CASE
+			        WHEN tls_expires_at IS NULL OR $2 > tls_expires_at THEN 0
+			        ELSE tls_warned_threshold
+			    END
+			WHERE id = $1`, j.ID, r.Cert.ExpiresAt, r.Cert.Issuer); err != nil {
+			return fmt.Errorf("update tls info: %w", err)
+		}
 	}
 
 	if tr.OpenIncident {
@@ -201,21 +172,6 @@ func (p *prober) tick(ctx context.Context) {
 			return
 		}
 	}
-}
-
-// probeErrorMessage renders a probe failure WITHOUT the target URL. Go's
-// transport errors are *url.Error, whose Error() embeds the full URL — which
-// may carry secret tokens or internal hostnames in its path/query. We surface
-// only the underlying cause (a timeout, DNS failure, connection refused,
-// blocked-address rejection, etc.), so the message is safe to store in an
-// incident cause and expose on the public status page.
-func probeErrorMessage(err error) string {
-	msg := err.Error()
-	var ue *url.Error
-	if errors.As(err, &ue) && ue.Err != nil {
-		msg = fmt.Sprintf("%s: %s", ue.Op, ue.Err.Error())
-	}
-	return truncate(msg, 300)
 }
 
 // truncate shortens s to at most n bytes on a rune boundary, so the result is

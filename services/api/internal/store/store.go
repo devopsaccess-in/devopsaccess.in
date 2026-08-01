@@ -59,6 +59,8 @@ type Monitor struct {
 	State            string     `json:"state"`
 	ConsecutiveFails int        `json:"consecutive_fails"`
 	LastCheckedAt    *time.Time `json:"last_checked_at"`
+	TLSExpiresAt     *time.Time `json:"tls_expires_at"`
+	TLSIssuer        string     `json:"tls_issuer"`
 	CreatedAt        time.Time  `json:"created_at"`
 	UpdatedAt        time.Time  `json:"updated_at"`
 }
@@ -71,6 +73,13 @@ type Result struct {
 	StatusCode *int      `json:"status_code"`
 	LatencyMs  *int      `json:"latency_ms"`
 	Error      string    `json:"error"`
+	// Per-phase breakdown; nil when the phase did not occur (no DNS for an
+	// IP literal, no TLS for plain http, no TTFB without a response).
+	DNSMs        *int   `json:"dns_ms"`
+	ConnectMs    *int   `json:"connect_ms"`
+	TLSMs        *int   `json:"tls_ms"`
+	TTFBMs       *int   `json:"ttfb_ms"`
+	FailurePhase string `json:"failure_phase"`
 }
 
 type Incident struct {
@@ -92,13 +101,14 @@ type Channel struct {
 
 const monitorCols = `id, tenant_id, name, url, method, interval_seconds, timeout_ms,
 	expected_status, failure_threshold, enabled, state, consecutive_fails,
-	last_checked_at, created_at, updated_at`
+	last_checked_at, tls_expires_at, tls_issuer, created_at, updated_at`
 
 func scanMonitor(row pgx.Row) (Monitor, error) {
 	var m Monitor
 	err := row.Scan(&m.ID, &m.TenantID, &m.Name, &m.URL, &m.Method, &m.IntervalSeconds,
 		&m.TimeoutMs, &m.ExpectedStatus, &m.FailureThreshold, &m.Enabled, &m.State,
-		&m.ConsecutiveFails, &m.LastCheckedAt, &m.CreatedAt, &m.UpdatedAt)
+		&m.ConsecutiveFails, &m.LastCheckedAt, &m.TLSExpiresAt, &m.TLSIssuer,
+		&m.CreatedAt, &m.UpdatedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return Monitor{}, ErrNotFound
 	}
@@ -239,7 +249,8 @@ func DeleteMonitor(ctx context.Context, q Querier, tenantID, id string) error {
 // --- results + uptime (tenant-scoped) ---
 
 func ListResults(ctx context.Context, q Querier, tenantID, monitorID string, since time.Time, limit int) ([]Result, error) {
-	rows, err := q.Query(ctx, `SELECT id, monitor_id, checked_at, ok, status_code, latency_ms, error
+	rows, err := q.Query(ctx, `SELECT id, monitor_id, checked_at, ok, status_code, latency_ms, error,
+			dns_ms, connect_ms, tls_ms, ttfb_ms, failure_phase
 		FROM monitor_results
 		WHERE monitor_id = $1 AND tenant_id = $2 AND checked_at >= $3
 		ORDER BY checked_at DESC LIMIT $4`, monitorID, tenantID, since, limit)
@@ -251,7 +262,8 @@ func ListResults(ctx context.Context, q Querier, tenantID, monitorID string, sin
 	results := []Result{}
 	for rows.Next() {
 		var r Result
-		if err := rows.Scan(&r.ID, &r.MonitorID, &r.CheckedAt, &r.OK, &r.StatusCode, &r.LatencyMs, &r.Error); err != nil {
+		if err := rows.Scan(&r.ID, &r.MonitorID, &r.CheckedAt, &r.OK, &r.StatusCode, &r.LatencyMs, &r.Error,
+			&r.DNSMs, &r.ConnectMs, &r.TLSMs, &r.TTFBMs, &r.FailurePhase); err != nil {
 			return nil, fmt.Errorf("scan result: %w", err)
 		}
 		results = append(results, r)
