@@ -25,6 +25,7 @@ covered by package tests · **manual** = part of the pre-launch manual gate in
 | Public status page — opt-in per tenant (off by default; `PATCH /api/settings` + Settings toggle) | built | E2E `TestIncidentPipeline` (404-before-opt-in) |
 | Public status page — API (`/api/status/{slug}`), no URL/cause leakage | built | E2E `TestIncidentPipeline` |
 | Public status page — dashboard UI (`/status/{slug}`) | built | E2E `TestDashboardStatusPage` |
+| Embeddable SVG badge (`/api/badge/{slug}/{id}.svg`, uptime/status, gated on the status opt-in) + copy-paste embed snippets in the dashboard | built | E2E `TestIncidentPipeline` (renders + no cross-slug leak) · unit (color/format/escaping) |
 | Dashboard (authed): monitors list + sparklines, monitor detail + latency chart, incidents, channels, settings | built | manual (needs real Auth0) — pre-launch gate |
 | 30-day results retention (nightly purge) | built | code-reviewed; no automated test (startup purge logged) |
 | Billing: manual Razorpay payment link | decided, not built | — |

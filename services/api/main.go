@@ -73,6 +73,7 @@ func main() {
 		_, _ = w.Write([]byte("ok"))
 	})
 	r.Get("/api/status/{slug}", s.handleStatus)
+	r.Get("/api/badge/{slug}/{monitor}", s.handleBadge)
 
 	r.Group(func(pr chi.Router) {
 		pr.Use(verifier.Middleware)

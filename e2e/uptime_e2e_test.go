@@ -250,6 +250,32 @@ func TestIncidentPipeline(t *testing.T) {
 		t.Fatalf("unknown slug = %d, want 404", s)
 	}
 
+	// Embeddable badge (public, gated on the same opt-in). The monitor is
+	// down right now, so the status badge should read "down".
+	badgeResp, err := c.http.Get(apiBase + "/api/badge/" + me.Tenant.Slug + "/" + m.ID + ".svg?metric=status")
+	if err != nil {
+		t.Fatalf("fetch badge: %v", err)
+	}
+	badgeBody, _ := io.ReadAll(badgeResp.Body)
+	badgeResp.Body.Close()
+	if ct := badgeResp.Header.Get("Content-Type"); !strings.HasPrefix(ct, "image/svg+xml") {
+		t.Fatalf("badge content-type = %q, want svg", ct)
+	}
+	if b := string(badgeBody); !strings.HasPrefix(b, "<svg") || !strings.Contains(b, ">down</text>") {
+		t.Fatalf("status badge not rendering 'down':\n%.400s", b)
+	}
+	// A monitor id under a DIFFERENT (nonexistent) slug must render the neutral
+	// badge, never that monitor's real state — no cross-tenant leak.
+	leakResp, err := c.http.Get(apiBase + "/api/badge/no-such-slug/" + m.ID + ".svg?metric=status")
+	if err != nil {
+		t.Fatalf("fetch leak badge: %v", err)
+	}
+	leakBody, _ := io.ReadAll(leakResp.Body)
+	leakResp.Body.Close()
+	if strings.Contains(string(leakBody), ">down</text>") {
+		t.Fatalf("badge leaked monitor state under a wrong slug:\n%.400s", leakBody)
+	}
+
 	// Fix it → recovery on first success + recovery notices.
 	healthy.Store(true)
 	waitForState(t, c, m.ID, "up", 60*time.Second)
