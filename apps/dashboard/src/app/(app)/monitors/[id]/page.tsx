@@ -10,6 +10,7 @@ import { fmtDuration, fmtPct, fmtTime } from "@/lib/format";
 import { StateBadge } from "@/components/state-badge";
 import { LatencyChart } from "@/components/latency-chart";
 import { EmbedBadge } from "@/components/embed-badge";
+import { PhaseBreakdown, TLSChip } from "@/components/phase-breakdown";
 
 function UptimeTile({ id, window: w }: { id: string; window: string }) {
   const uptime = useQuery({
@@ -81,6 +82,7 @@ export default function MonitorDetailPage({ params }: { params: Promise<{ id: st
           <h1 className="text-2xl font-semibold">{m.name}</h1>
           <StateBadge state={m.enabled ? m.state : "unknown"} />
           {!m.enabled && <span className="font-mono text-xs text-mist-faint">paused</span>}
+          <TLSChip expiresAt={m.tls_expires_at} issuer={m.tls_issuer} />
         </div>
         <p className="mt-1 font-mono text-sm text-mist-dim">
           {m.method} {m.url} · every {m.interval_seconds}s · expect {m.expected_status} · alert
@@ -114,6 +116,14 @@ export default function MonitorDetailPage({ params }: { params: Promise<{ id: st
           </div>
         </div>
         <LatencyChart results={results.data?.results ?? []} />
+      </div>
+
+      <div className="card">
+        <div className="mb-4 flex items-baseline justify-between">
+          <h2 className="text-base font-medium text-white">Where the time goes</h2>
+          <span className="text-xs text-mist-faint">latest check</span>
+        </div>
+        <PhaseBreakdown results={results.data?.results ?? []} />
       </div>
 
       <div className="card">

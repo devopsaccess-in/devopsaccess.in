@@ -289,20 +289,37 @@ func TestIncidentPipeline(t *testing.T) {
 	// History endpoints carry the data.
 	var results struct {
 		Results []struct {
-			OK bool `json:"ok"`
+			OK           bool   `json:"ok"`
+			ConnectMs    *int   `json:"connect_ms"`
+			TTFBMs       *int   `json:"ttfb_ms"`
+			FailurePhase string `json:"failure_phase"`
 		} `json:"results"`
 	}
 	c.mustDo(t, "GET", "/api/monitors/"+m.ID+"/results?window=24h", nil, &results, http.StatusOK)
-	var oks, fails int
+	var oks, fails, withTimings, statusPhase int
 	for _, r := range results.Results {
 		if r.OK {
 			oks++
 		} else {
 			fails++
+			if r.FailurePhase == "status" {
+				statusPhase++
+			}
+		}
+		// Deep probe: every check records its phase breakdown (the target is
+		// plain http on loopback, so TCP connect + TTFB are always present).
+		if r.ConnectMs != nil && r.TTFBMs != nil {
+			withTimings++
 		}
 	}
 	if oks == 0 || fails < 2 {
 		t.Fatalf("results window missing checks: %d ok / %d failed", oks, fails)
+	}
+	if withTimings != len(results.Results) {
+		t.Fatalf("phase timings missing: %d of %d results have connect+ttfb", withTimings, len(results.Results))
+	}
+	if statusPhase == 0 {
+		t.Fatalf("failures should be diagnosed with failure_phase=status, got none in %d failures", fails)
 	}
 	var uptime struct {
 		Total     int64    `json:"total"`

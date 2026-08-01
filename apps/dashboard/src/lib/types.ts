@@ -13,6 +13,8 @@ export type Monitor = {
   state: "unknown" | "up" | "down";
   consecutive_fails: number;
   last_checked_at: string | null;
+  tls_expires_at: string | null;
+  tls_issuer: string;
   created_at: string;
   updated_at: string;
 };
@@ -25,6 +27,11 @@ export type CheckResult = {
   status_code: number | null;
   latency_ms: number | null;
   error: string;
+  dns_ms: number | null;
+  connect_ms: number | null;
+  tls_ms: number | null;
+  ttfb_ms: number | null;
+  failure_phase: string;
 };
 
 export type Incident = {

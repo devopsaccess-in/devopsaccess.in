@@ -77,6 +77,7 @@ func main() {
 		case <-tick.C:
 			p.tick(ctx)
 			p.notifyIncidents(ctx)
+			p.notifyCertExpiry(ctx)
 		case <-purge.C:
 			p.purgeOldResults(ctx)
 		}
