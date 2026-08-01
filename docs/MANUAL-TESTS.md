@@ -197,6 +197,31 @@ restart.
 
 ---
 
+## MT-13 — Heartbeat monitor (cron / dead man's switch)
+**Depends on:** public ping endpoint through nginx/Cloudflare, real relay.
+1. **Monitors → Add monitor → "Cron / job"**. Name "test heartbeat", expect a
+   ping every **5 minutes**, grace **1 minute**. Create — you land on the
+   detail page.
+2. Copy the `curl` snippet and run it from your laptop. Reload the page.
+3. Stop pinging. Wait ~6–7 minutes (period + grace + one evaluation).
+4. Run the curl snippet once more.
+5. Try a made-up token: `curl -i https://app.devopsaccess.in/api/ping/zzzzzzzzzzzzzzzzzzzzzzzzzzz`
+
+**Expected:**
+- (2) `ok` in the terminal; "last ping" updates; state **up**.
+- (3) state flips to **down**, an incident opens whose cause says how late the
+  heartbeat is, and a DOWN email arrives.
+- (4) state returns to **up** immediately, the incident resolves, and a
+  RESOLVED email arrives.
+- (5) HTTP 404 with a bare "not found" — no hint about whether the token
+  format is right.
+- The detail page shows no response-time chart or phase breakdown (there is no
+  HTTP probe for a heartbeat).
+
+**Result:** ⬜
+
+---
+
 ## MT-9 — Cleanup
 1. Delete the test monitors (health-probe-up, health-probe-down) and the test
    channels.

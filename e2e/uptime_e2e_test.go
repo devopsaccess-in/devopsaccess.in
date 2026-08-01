@@ -340,6 +340,109 @@ func TestIncidentPipeline(t *testing.T) {
 	c.mustDo(t, "DELETE", "/api/channels/"+slackCh.ID, nil, nil, http.StatusNoContent)
 }
 
+// FEATURES.md: heartbeat ("dead man's switch") monitors — the job pings us,
+// and silence is the failure.
+func TestHeartbeatMonitor(t *testing.T) {
+	sub := uniqueSub("heartbeat")
+	c := newClient(t, sub, "cron@a.in", "")
+	c.mustDo(t, "GET", "/api/me", nil, nil, http.StatusOK)
+
+	alertTo := fmt.Sprintf("cron-%s@e2e.in", strings.TrimPrefix(sub, "auth0|"))
+	var ch struct {
+		ID string `json:"id"`
+	}
+	c.mustDo(t, "POST", "/api/channels",
+		map[string]any{"type": "email", "config": map[string]string{"to": alertTo}},
+		&ch, http.StatusCreated)
+
+	// Shortest allowed cadence so the test isn't slow: ping every 60s, 30s grace.
+	var m struct {
+		ID        string  `json:"id"`
+		Kind      string  `json:"kind"`
+		PingToken *string `json:"ping_token"`
+		State     string  `json:"state"`
+	}
+	c.mustDo(t, "POST", "/api/monitors", map[string]any{
+		"name": "nightly backup", "kind": "heartbeat",
+		"period_seconds": 60, "grace_seconds": 30, "interval_seconds": 60,
+	}, &m, http.StatusCreated)
+
+	if m.Kind != "heartbeat" || m.PingToken == nil || len(*m.PingToken) < 20 {
+		t.Fatalf("heartbeat not provisioned with a token: %+v", m)
+	}
+
+	pingURL := apiBase + "/api/ping/" + *m.PingToken
+
+	// A fresh heartbeat is healthy for its first window (creating one must not
+	// page you immediately).
+	expedite(t, m.ID)
+	waitForState(t, c, m.ID, "up", 30*time.Second)
+
+	// The ping endpoint is public and needs no auth — this is what a cron job
+	// runs. Unknown tokens must 404 and reveal nothing.
+	anon := &apiClient{http: c.http}
+	resp, err := anon.http.Get(pingURL)
+	if err != nil {
+		t.Fatalf("ping: %v", err)
+	}
+	body, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK || !strings.Contains(string(body), "ok") {
+		t.Fatalf("ping = %d %q, want 200 ok", resp.StatusCode, body)
+	}
+	bad, err := anon.http.Get(apiBase + "/api/ping/" + strings.Repeat("z", 27))
+	if err != nil {
+		t.Fatalf("bad ping: %v", err)
+	}
+	bad.Body.Close()
+	if bad.StatusCode != http.StatusNotFound {
+		t.Fatalf("unknown ping token = %d, want 404", bad.StatusCode)
+	}
+
+	// Stop pinging and push the clock past period+grace: the heartbeat goes
+	// down, opens an incident, and alerts — with no HTTP probe involved.
+	stalePing(t, m.ID, 5*time.Minute)
+	waitForState(t, c, m.ID, "down", 60*time.Second)
+
+	var incidents struct {
+		Incidents []struct {
+			ID    string `json:"id"`
+			Cause string `json:"cause"`
+		} `json:"incidents"`
+	}
+	c.mustDo(t, "GET", "/api/incidents?monitor_id="+m.ID, nil, &incidents, http.StatusOK)
+	if len(incidents.Incidents) != 1 {
+		t.Fatalf("want one heartbeat incident, got %+v", incidents.Incidents)
+	}
+	if !strings.Contains(incidents.Incidents[0].Cause, "late") {
+		t.Errorf("incident cause should explain the lateness: %q", incidents.Incidents[0].Cause)
+	}
+	mailSink.waitFor(t, alertTo, "DOWN: nightly backup", 20*time.Second)
+
+	// The job runs again: one ping is the full recovery signal.
+	resp2, err := anon.http.Get(pingURL)
+	if err != nil {
+		t.Fatalf("recovery ping: %v", err)
+	}
+	resp2.Body.Close()
+
+	var after struct {
+		State string `json:"state"`
+	}
+	c.mustDo(t, "GET", "/api/monitors/"+m.ID, nil, &after, http.StatusOK)
+	if after.State != "up" {
+		t.Fatalf("state after recovery ping = %q, want up", after.State)
+	}
+	c.mustDo(t, "GET", "/api/incidents?monitor_id="+m.ID, nil, &incidents, http.StatusOK)
+	if len(incidents.Incidents) != 1 {
+		t.Fatalf("recovery should not open a second incident: %+v", incidents.Incidents)
+	}
+	mailSink.waitFor(t, alertTo, "RESOLVED: nightly backup", 25*time.Second)
+
+	c.mustDo(t, "DELETE", "/api/monitors/"+m.ID, nil, nil, http.StatusNoContent)
+	c.mustDo(t, "DELETE", "/api/channels/"+ch.ID, nil, nil, http.StatusNoContent)
+}
+
 // FEATURES.md: public status page (dashboard UI). Runs only when the built
 // dashboard is provided (E2E_DASHBOARD_DIR) — auth'd dashboard pages need a
 // real Auth0 tenant and stay a manual gate.

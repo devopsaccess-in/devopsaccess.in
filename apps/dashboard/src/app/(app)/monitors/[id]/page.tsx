@@ -11,6 +11,7 @@ import { StateBadge } from "@/components/state-badge";
 import { LatencyChart } from "@/components/latency-chart";
 import { EmbedBadge } from "@/components/embed-badge";
 import { PhaseBreakdown, TLSChip } from "@/components/phase-breakdown";
+import { PingURL, fmtSeconds } from "@/components/ping-url";
 
 function UptimeTile({ id, window: w }: { id: string; window: string }) {
   const uptime = useQuery({
@@ -85,8 +86,17 @@ export default function MonitorDetailPage({ params }: { params: Promise<{ id: st
           <TLSChip expiresAt={m.tls_expires_at} issuer={m.tls_issuer} />
         </div>
         <p className="mt-1 font-mono text-sm text-mist-dim">
-          {m.method} {m.url} · every {m.interval_seconds}s · expect {m.expected_status} · alert
-          after {m.failure_threshold} fails
+          {m.kind === "heartbeat" ? (
+            <>
+              heartbeat · expect a ping every {fmtSeconds(m.period_seconds)} ·{" "}
+              {fmtSeconds(m.grace_seconds)} grace
+            </>
+          ) : (
+            <>
+              {m.method} {m.url} · every {m.interval_seconds}s · expect {m.expected_status} ·
+              alert after {m.failure_threshold} fails
+            </>
+          )}
         </p>
       </div>
 
@@ -96,6 +106,9 @@ export default function MonitorDetailPage({ params }: { params: Promise<{ id: st
         <UptimeTile id={id} window="30d" />
       </div>
 
+      <PingURL monitor={m} />
+
+      {m.kind !== "heartbeat" && (
       <div className="card">
         <div className="mb-4 flex items-center justify-between">
           <h2 className="text-base font-medium text-white">Response time</h2>
@@ -117,7 +130,9 @@ export default function MonitorDetailPage({ params }: { params: Promise<{ id: st
         </div>
         <LatencyChart results={results.data?.results ?? []} />
       </div>
+      )}
 
+      {m.kind !== "heartbeat" && (
       <div className="card">
         <div className="mb-4 flex items-baseline justify-between">
           <h2 className="text-base font-medium text-white">Where the time goes</h2>
@@ -125,6 +140,7 @@ export default function MonitorDetailPage({ params }: { params: Promise<{ id: st
         </div>
         <PhaseBreakdown results={results.data?.results ?? []} />
       </div>
+      )}
 
       <div className="card">
         <h2 className="mb-4 text-base font-medium text-white">Incidents</h2>

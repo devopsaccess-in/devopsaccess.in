@@ -16,6 +16,7 @@ covered by package tests · **manual** = part of the pre-launch manual gate in
 | Signup via Auth0; user + personal tenant auto-provisioned on first login (unique slug from email) | built | E2E `TestSignupProvisioning` · manual (real Auth0 login) |
 | Multi-tenant isolation: cross-tenant reads/writes indistinguishable from 404, Postgres RLS + app-layer scoping | built | E2E `TestTenantIsolation` · integration `TestTenantIsolationRLS` (`-tags integration`) |
 | HTTP(S) monitors: CRUD, GET/HEAD, 60–300s interval, expected status, failure threshold 1–10, pause/resume | built | E2E `TestMonitorValidation`, `TestIncidentPipeline` · unit (field validation) |
+| Heartbeat ("dead man's switch") monitors: your cron/backup/pipeline pings a secret URL; silence past period+grace opens an incident and alerts. Public `GET\|POST /api/ping/{token}`, copy-paste curl/crontab snippets in the dashboard | built | E2E `TestHeartbeatMonitor` (ping→up, silence→down+email, ping→recovery, unknown token 404) · unit `TestEvaluateHeartbeat` |
 | SSRF-guarded probing and URL validation (public IPs only, ports 80/443, DNS-rebinding safe) | built | unit `TestValidateMonitorURL` · code: `safehttp` dialer re-checks at connect time |
 | Prober: due-monitor claiming (`SKIP LOCKED`), worker pool, per-monitor timeout, results history | built | E2E `TestIncidentPipeline` |
 | Deep probe: per-phase timings (DNS / TCP / TLS / server) recorded on every check, shown as a breakdown on the monitor page | built | unit `TestCheckCapturesPhaseTimings` · E2E asserts timings on every result |

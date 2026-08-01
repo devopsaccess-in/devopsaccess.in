@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"time"
 	"unicode/utf8"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -15,6 +16,7 @@ type job struct {
 	ID               string
 	TenantID         string
 	Name             string
+	Kind             string // "http" (we fetch) or "heartbeat" (they ping us)
 	URL              string
 	Method           string
 	TimeoutMs        int
@@ -22,6 +24,11 @@ type job struct {
 	FailureThreshold int
 	State            string
 	ConsecutiveFails int
+	// Heartbeat fields.
+	PeriodSeconds int
+	GraceSeconds  int
+	LastPingAt    *time.Time
+	CreatedAt     time.Time
 }
 
 // prober claims due monitors, probes them, and applies the state machine.
@@ -54,8 +61,9 @@ func (p *prober) claimDue(ctx context.Context, limit int) ([]job, error) {
 			LIMIT $1
 			FOR UPDATE SKIP LOCKED
 		)
-		RETURNING id, tenant_id, name, url, method, timeout_ms, expected_status,
-			failure_threshold, state, consecutive_fails`, limit)
+		RETURNING id, tenant_id, name, kind, url, method, timeout_ms, expected_status,
+			failure_threshold, state, consecutive_fails,
+			period_seconds, grace_seconds, last_ping_at, created_at`, limit)
 	if err != nil {
 		return nil, fmt.Errorf("claim due monitors: %w", err)
 	}
@@ -64,8 +72,9 @@ func (p *prober) claimDue(ctx context.Context, limit int) ([]job, error) {
 	var jobs []job
 	for rows.Next() {
 		var j job
-		if err := rows.Scan(&j.ID, &j.TenantID, &j.Name, &j.URL, &j.Method, &j.TimeoutMs,
-			&j.ExpectedStatus, &j.FailureThreshold, &j.State, &j.ConsecutiveFails); err != nil {
+		if err := rows.Scan(&j.ID, &j.TenantID, &j.Name, &j.Kind, &j.URL, &j.Method, &j.TimeoutMs,
+			&j.ExpectedStatus, &j.FailureThreshold, &j.State, &j.ConsecutiveFails,
+			&j.PeriodSeconds, &j.GraceSeconds, &j.LastPingAt, &j.CreatedAt); err != nil {
 			return nil, fmt.Errorf("scan claimed monitor: %w", err)
 		}
 		jobs = append(jobs, j)
@@ -150,12 +159,21 @@ func (p *prober) runOne(ctx context.Context, j job) {
 			p.log.Error().Interface("panic", v).Str("monitor_id", j.ID).Msg("check panicked")
 		}
 	}()
-	r := check(ctx, j, p.insecureTargets)
+	// A heartbeat is evaluated against the clock, not fetched — everything
+	// downstream (results, state machine, incidents, alerts) is identical.
+	var r checkResult
+	if j.Kind == "heartbeat" {
+		r = evaluateHeartbeat(time.Now(), j.LastPingAt, j.CreatedAt, j.PeriodSeconds, j.GraceSeconds)
+	} else {
+		r = check(ctx, j, p.insecureTargets)
+	}
+
 	if err := p.apply(ctx, j, r); err != nil {
 		p.log.Error().Err(err).Str("monitor_id", j.ID).Msg("apply check result failed")
 		return
 	}
-	p.log.Debug().Str("monitor_id", j.ID).Bool("ok", r.OK).Int("latency_ms", r.LatencyMs).Msg("checked")
+	p.log.Debug().Str("monitor_id", j.ID).Str("kind", j.Kind).Bool("ok", r.OK).
+		Int("latency_ms", r.LatencyMs).Msg("checked")
 }
 
 // tick claims everything due and enqueues it for the worker pool.

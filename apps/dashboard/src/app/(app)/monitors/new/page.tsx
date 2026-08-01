@@ -9,6 +9,7 @@ import type { Monitor } from "@/lib/types";
 export default function NewMonitorPage() {
   const router = useRouter();
   const qc = useQueryClient();
+  const [kind, setKind] = useState<"http" | "heartbeat">("http");
   const [form, setForm] = useState({
     name: "",
     url: "",
@@ -16,13 +17,29 @@ export default function NewMonitorPage() {
     interval_seconds: 60,
     expected_status: 200,
     failure_threshold: 2,
+    period_seconds: 3600,
+    grace_seconds: 300,
   });
 
   const create = useMutation({
-    mutationFn: () => api<Monitor>("/api/monitors", { method: "POST", body: JSON.stringify(form) }),
-    onSuccess: () => {
+    mutationFn: () => {
+      // Send only the fields that apply to the chosen kind.
+      const body =
+        kind === "heartbeat"
+          ? {
+              kind,
+              name: form.name,
+              period_seconds: form.period_seconds,
+              grace_seconds: form.grace_seconds,
+            }
+          : { kind, ...form };
+      return api<Monitor>("/api/monitors", { method: "POST", body: JSON.stringify(body) });
+    },
+    onSuccess: (m) => {
       void qc.invalidateQueries({ queryKey: ["monitors"] });
-      router.push("/monitors");
+      // A heartbeat is useless until you wire up its ping URL, so go straight
+      // to the detail page where the snippets live.
+      router.push(kind === "heartbeat" ? `/monitors/${m.id}` : "/monitors");
     },
   });
 
@@ -36,17 +53,90 @@ export default function NewMonitorPage() {
           create.mutate();
         }}
       >
+        {/* What kind of thing are we watching? */}
+        <div className="grid grid-cols-2 gap-3">
+          {(
+            [
+              {
+                k: "http" as const,
+                title: "Website / API",
+                blurb: "We call your URL on a schedule",
+              },
+              {
+                k: "heartbeat" as const,
+                title: "Cron / job",
+                blurb: "Your job calls us when it finishes",
+              },
+            ]
+          ).map((opt) => (
+            <button
+              key={opt.k}
+              type="button"
+              onClick={() => setKind(opt.k)}
+              aria-pressed={kind === opt.k}
+              className={`rounded-lg border p-3 text-left transition ${
+                kind === opt.k
+                  ? "border-node bg-ink-soft"
+                  : "border-ink-line hover:border-mist-faint"
+              }`}
+            >
+              <div className="text-sm font-medium text-white">{opt.title}</div>
+              <div className="mt-0.5 text-xs text-mist-faint">{opt.blurb}</div>
+            </button>
+          ))}
+        </div>
+
         <label className="block">
           <span className="mb-1 block text-sm text-mist">Name</span>
           <input
             className="field"
             required
             maxLength={100}
-            placeholder="Production API"
+            placeholder={kind === "heartbeat" ? "Nightly database backup" : "Production API"}
             value={form.name}
             onChange={(e) => setForm({ ...form, name: e.target.value })}
           />
         </label>
+        {kind === "heartbeat" ? (
+          <>
+            <div className="grid grid-cols-2 gap-4">
+              <label className="block">
+                <span className="mb-1 block text-sm text-mist">Expect a ping every</span>
+                <select
+                  className="field"
+                  value={form.period_seconds}
+                  onChange={(e) => setForm({ ...form, period_seconds: Number(e.target.value) })}
+                >
+                  <option value={300}>5 minutes</option>
+                  <option value={900}>15 minutes</option>
+                  <option value={3600}>hour</option>
+                  <option value={21600}>6 hours</option>
+                  <option value={86400}>day</option>
+                  <option value={604800}>week</option>
+                </select>
+              </label>
+              <label className="block">
+                <span className="mb-1 block text-sm text-mist">Grace period</span>
+                <select
+                  className="field"
+                  value={form.grace_seconds}
+                  onChange={(e) => setForm({ ...form, grace_seconds: Number(e.target.value) })}
+                >
+                  <option value={60}>1 minute</option>
+                  <option value={300}>5 minutes</option>
+                  <option value={1800}>30 minutes</option>
+                  <option value={3600}>1 hour</option>
+                  <option value={21600}>6 hours</option>
+                </select>
+              </label>
+            </div>
+            <p className="text-xs text-mist-faint">
+              We alert when no ping arrives within the period plus the grace. You get the ping
+              URL and copy-paste snippets right after creating this.
+            </p>
+          </>
+        ) : (
+          <>
         <label className="block">
           <span className="mb-1 block text-sm text-mist">URL</span>
           <input
@@ -110,6 +200,8 @@ export default function NewMonitorPage() {
             </select>
           </label>
         </div>
+          </>
+        )}
 
         {create.isError && <p className="text-sm text-alert">{create.error.message}</p>}
 

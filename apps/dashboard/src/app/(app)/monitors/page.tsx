@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "@/lib/api";
 import type { CheckResult, Monitor, Uptime } from "@/lib/types";
-import { fmtPct } from "@/lib/format";
+import { fmtPct, fmtTime } from "@/lib/format";
 import { StateBadge } from "@/components/state-badge";
 import { Sparkline } from "@/components/sparkline";
 
@@ -28,11 +28,22 @@ function MonitorRow({ monitor }: { monitor: Monitor }) {
         <div className="flex items-center gap-3">
           <span className="truncate font-medium text-white">{monitor.name}</span>
           <StateBadge state={monitor.enabled ? monitor.state : "unknown"} />
+          {monitor.kind === "heartbeat" && (
+            <span className="rounded-full border border-ink-line bg-ink-soft px-2 py-0.5 font-mono text-xs text-mist-faint">
+              heartbeat
+            </span>
+          )}
           {!monitor.enabled && (
             <span className="font-mono text-xs text-mist-faint">paused</span>
           )}
         </div>
-        <div className="mt-1 truncate font-mono text-xs text-mist-dim">{monitor.url}</div>
+        <div className="mt-1 truncate font-mono text-xs text-mist-dim">
+          {monitor.kind === "heartbeat"
+            ? monitor.last_ping_at
+              ? `last ping ${fmtTime(monitor.last_ping_at)}`
+              : "waiting for the first ping"
+            : monitor.url}
+        </div>
       </div>
       <div className="flex items-center gap-6">
         <div className="text-right">
