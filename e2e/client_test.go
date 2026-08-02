@@ -121,6 +121,20 @@ func expedite(t *testing.T, monitorID string) {
 	}
 }
 
+// stalePing backdates a heartbeat's last ping so it is overdue, standing in
+// for the passage of time (a test can't wait out a real period+grace window).
+func stalePing(t *testing.T, monitorID string, age time.Duration) {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if _, err := adminPool.Exec(ctx,
+		`UPDATE monitors SET last_ping_at = now() - $2::interval, created_at = now() - $2::interval
+		 WHERE id = $1`,
+		monitorID, fmt.Sprintf("%d seconds", int(age.Seconds()))); err != nil {
+		t.Fatalf("stale ping: %v", err)
+	}
+}
+
 // waitForState polls a monitor (expediting between polls) until it reaches
 // the wanted state.
 func waitForState(t *testing.T, c *apiClient, id, want string, timeout time.Duration) {

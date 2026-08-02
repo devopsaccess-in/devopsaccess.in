@@ -19,15 +19,35 @@ import (
 // defaults.
 type monitorInput struct {
 	Name             string `json:"name"`
+	Kind             string `json:"kind"`
 	URL              string `json:"url"`
 	Method           string `json:"method"`
 	IntervalSeconds  int    `json:"interval_seconds"`
 	TimeoutMs        int    `json:"timeout_ms"`
 	ExpectedStatus   int    `json:"expected_status"`
 	FailureThreshold int    `json:"failure_threshold"`
+	PeriodSeconds    int    `json:"period_seconds"`
+	GraceSeconds     int    `json:"grace_seconds"`
 }
 
 func (in *monitorInput) applyDefaults() {
+	if in.Kind == "" {
+		in.Kind = "http"
+	}
+	if in.Kind == "heartbeat" {
+		// A heartbeat is never fetched: no URL, and one missed window is
+		// already a real failure, so it alerts on the first late evaluation.
+		in.URL = ""
+		if in.PeriodSeconds == 0 {
+			in.PeriodSeconds = 3600
+		}
+		if in.GraceSeconds == 0 {
+			in.GraceSeconds = 300
+		}
+		if in.FailureThreshold == 0 {
+			in.FailureThreshold = 1
+		}
+	}
 	if in.Method == "" {
 		in.Method = "GET"
 	}
@@ -73,6 +93,18 @@ func validateMonitorFields(name, method string, interval, timeout, expected, thr
 	return nil
 }
 
+// validateHeartbeatFields checks the heartbeat-only inputs. Mirrors the DB
+// CHECK constraints in migration 0004.
+func validateHeartbeatFields(period, grace int) error {
+	if period < 60 || period > 604800 {
+		return fmt.Errorf("period_seconds must be between 60 (1 minute) and 604800 (7 days)")
+	}
+	if grace < 30 || grace > 86400 {
+		return fmt.Errorf("grace_seconds must be between 30 and 86400 (1 day)")
+	}
+	return nil
+}
+
 func (s *server) listMonitors(w http.ResponseWriter, r *http.Request) {
 	var monitors []store.Monitor
 	err := db.WithTenant(r.Context(), s.pool, tenantID(r.Context()), func(tx pgx.Tx) error {
@@ -94,11 +126,20 @@ func (s *server) createMonitor(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	in.applyDefaults()
+	if in.Kind != "http" && in.Kind != "heartbeat" {
+		s.writeError(w, http.StatusBadRequest, `kind must be "http" or "heartbeat"`)
+		return
+	}
 	if err := validateMonitorFields(in.Name, in.Method, in.IntervalSeconds, in.TimeoutMs, in.ExpectedStatus, in.FailureThreshold); err != nil {
 		s.writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	if err := validateMonitorURL(r.Context(), in.URL, defaultLookup, s.cfg.allowPrivateTargets); err != nil {
+	if in.Kind == "heartbeat" {
+		if err := validateHeartbeatFields(in.PeriodSeconds, in.GraceSeconds); err != nil {
+			s.writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+	} else if err := validateMonitorURL(r.Context(), in.URL, defaultLookup, s.cfg.allowPrivateTargets); err != nil {
 		s.writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
@@ -108,12 +149,15 @@ func (s *server) createMonitor(w http.ResponseWriter, r *http.Request) {
 		var err error
 		m, err = store.CreateMonitor(r.Context(), tx, tenantID(r.Context()), store.NewMonitor{
 			Name:             strings.TrimSpace(in.Name),
+			Kind:             in.Kind,
 			URL:              strings.TrimSpace(in.URL),
 			Method:           in.Method,
 			IntervalSeconds:  in.IntervalSeconds,
 			TimeoutMs:        in.TimeoutMs,
 			ExpectedStatus:   in.ExpectedStatus,
 			FailureThreshold: in.FailureThreshold,
+			PeriodSeconds:    in.PeriodSeconds,
+			GraceSeconds:     in.GraceSeconds,
 		})
 		return err
 	})

@@ -33,7 +33,7 @@ func (p *prober) notifyCertExpiry(ctx context.Context) {
 		FROM monitors
 		WHERE enabled
 		  AND tls_expires_at IS NOT NULL
-		  AND tls_expires_at <= now() + ($1 || ' days')::interval
+		  AND tls_expires_at <= now() + make_interval(days => $1)
 		ORDER BY tls_expires_at
 		LIMIT 100`, certWarnDays)
 	if err != nil {

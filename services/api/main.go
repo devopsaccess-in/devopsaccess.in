@@ -74,6 +74,10 @@ func main() {
 	})
 	r.Get("/api/status/{slug}", s.handleStatus)
 	r.Get("/api/badge/{slug}/{monitor}", s.handleBadge)
+	// Heartbeat ingress: the token is the capability. GET and POST so it works
+	// from curl, wget, and language HTTP clients alike.
+	r.Get("/api/ping/{token}", s.handlePing)
+	r.Post("/api/ping/{token}", s.handlePing)
 
 	r.Group(func(pr chi.Router) {
 		pr.Use(verifier.Middleware)

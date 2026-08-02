@@ -8,6 +8,8 @@ package store
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/base64"
 	"errors"
 	"fmt"
 	"strings"
@@ -46,9 +48,17 @@ type Tenant struct {
 }
 
 type Monitor struct {
-	ID               string     `json:"id"`
-	TenantID         string     `json:"-"`
-	Name             string     `json:"name"`
+	ID       string `json:"id"`
+	TenantID string `json:"-"`
+	Name     string `json:"name"`
+	// Kind is "http" (we call the target) or "heartbeat" (the target calls us).
+	Kind string `json:"kind"`
+	// Heartbeat fields; zero/empty for http monitors.
+	PeriodSeconds int        `json:"period_seconds"`
+	GraceSeconds  int        `json:"grace_seconds"`
+	PingToken     *string    `json:"ping_token"`
+	LastPingAt    *time.Time `json:"last_ping_at"`
+
 	URL              string     `json:"url"`
 	Method           string     `json:"method"`
 	IntervalSeconds  int        `json:"interval_seconds"`
@@ -99,13 +109,16 @@ type Channel struct {
 	CreatedAt time.Time       `json:"created_at"`
 }
 
-const monitorCols = `id, tenant_id, name, url, method, interval_seconds, timeout_ms,
+const monitorCols = `id, tenant_id, name, kind, period_seconds, grace_seconds,
+	ping_token, last_ping_at, url, method, interval_seconds, timeout_ms,
 	expected_status, failure_threshold, enabled, state, consecutive_fails,
 	last_checked_at, tls_expires_at, tls_issuer, created_at, updated_at`
 
 func scanMonitor(row pgx.Row) (Monitor, error) {
 	var m Monitor
-	err := row.Scan(&m.ID, &m.TenantID, &m.Name, &m.URL, &m.Method, &m.IntervalSeconds,
+	err := row.Scan(&m.ID, &m.TenantID, &m.Name, &m.Kind, &m.PeriodSeconds, &m.GraceSeconds,
+		&m.PingToken, &m.LastPingAt,
+		&m.URL, &m.Method, &m.IntervalSeconds,
 		&m.TimeoutMs, &m.ExpectedStatus, &m.FailureThreshold, &m.Enabled, &m.State,
 		&m.ConsecutiveFails, &m.LastCheckedAt, &m.TLSExpiresAt, &m.TLSIssuer,
 		&m.CreatedAt, &m.UpdatedAt)
@@ -139,24 +152,114 @@ func ListMonitors(ctx context.Context, q Querier, tenantID string) ([]Monitor, e
 	return monitors, rows.Err()
 }
 
-// NewMonitor is the validated input for CreateMonitor.
+// NewMonitor is the validated input for CreateMonitor. Kind "http" uses
+// URL/Method/ExpectedStatus/TimeoutMs; kind "heartbeat" uses
+// PeriodSeconds/GraceSeconds and gets a generated PingToken.
 type NewMonitor struct {
 	Name             string
+	Kind             string
 	URL              string
 	Method           string
 	IntervalSeconds  int
 	TimeoutMs        int
 	ExpectedStatus   int
 	FailureThreshold int
+	PeriodSeconds    int
+	GraceSeconds     int
 }
 
 func CreateMonitor(ctx context.Context, q Querier, tenantID string, n NewMonitor) (Monitor, error) {
-	return scanMonitor(q.QueryRow(ctx, `INSERT INTO monitors
-		(tenant_id, name, url, method, interval_seconds, timeout_ms, expected_status, failure_threshold)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+	if n.Kind == "" {
+		n.Kind = "http"
+	}
+	// period/grace are meaningless for http monitors but still carry NOT NULL
+	// CHECK constraints, so fall back to the column defaults rather than
+	// inserting a zero the constraint rejects.
+	if n.PeriodSeconds == 0 {
+		n.PeriodSeconds = 3600
+	}
+	if n.GraceSeconds == 0 {
+		n.GraceSeconds = 300
+	}
+	var token *string
+	if n.Kind == "heartbeat" {
+		t, err := NewPingToken()
+		if err != nil {
+			return Monitor{}, err
+		}
+		token = &t
+	}
+	m, err := scanMonitor(q.QueryRow(ctx, `INSERT INTO monitors
+		(tenant_id, name, kind, url, method, interval_seconds, timeout_ms,
+		 expected_status, failure_threshold, period_seconds, grace_seconds, ping_token)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
 		RETURNING `+monitorCols,
-		tenantID, n.Name, n.URL, n.Method, n.IntervalSeconds, n.TimeoutMs,
-		n.ExpectedStatus, n.FailureThreshold))
+		tenantID, n.Name, n.Kind, n.URL, n.Method, n.IntervalSeconds, n.TimeoutMs,
+		n.ExpectedStatus, n.FailureThreshold, n.PeriodSeconds, n.GraceSeconds, token))
+	if err != nil {
+		return Monitor{}, err
+	}
+
+	// Mirror the token into the RLS-free lookup table so an unauthenticated
+	// ping can resolve it (see migration 0004). Same transaction, and the FK
+	// cascade removes it with the monitor.
+	if token != nil {
+		if _, err := q.Exec(ctx, `INSERT INTO heartbeat_tokens (token, monitor_id, tenant_id)
+			VALUES ($1, $2, $3)`, *token, m.ID, tenantID); err != nil {
+			return Monitor{}, fmt.Errorf("register ping token: %w", err)
+		}
+	}
+	return m, nil
+}
+
+// NewPingToken mints the unguessable capability embedded in a heartbeat's
+// ping URL: 160 bits of crypto/rand, URL-safe.
+func NewPingToken() (string, error) {
+	b := make([]byte, 20)
+	if _, err := rand.Read(b); err != nil {
+		return "", fmt.Errorf("generate ping token: %w", err)
+	}
+	return base64.RawURLEncoding.EncodeToString(b), nil
+}
+
+// TokenLookup resolves a ping token to its monitor and tenant. Reads the
+// RLS-free heartbeat_tokens table: an unauthenticated ping has no tenant
+// context, so this is what establishes one (see migration 0004).
+func TokenLookup(ctx context.Context, q Querier, token string) (monitorID, tenantID string, err error) {
+	err = q.QueryRow(ctx, `SELECT monitor_id, tenant_id FROM heartbeat_tokens
+		WHERE token = $1`, token).Scan(&monitorID, &tenantID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", "", ErrNotFound
+	}
+	if err != nil {
+		return "", "", fmt.Errorf("lookup ping token: %w", err)
+	}
+	return monitorID, tenantID, nil
+}
+
+// RecordPing marks a heartbeat as just-seen, clears its failure state, and
+// resolves an open incident if it was down. tx must already be scoped to the
+// monitor's tenant (via db.WithTenant) so RLS applies to the writes.
+// Returns ErrNotFound if the monitor is disabled or no longer a heartbeat.
+func RecordPing(ctx context.Context, q Querier, tenantID, monitorID string) error {
+	tag, err := q.Exec(ctx, `UPDATE monitors
+		SET last_ping_at = now(), state = 'up', consecutive_fails = 0, updated_at = now()
+		WHERE id = $1 AND tenant_id = $2 AND kind = 'heartbeat' AND enabled`,
+		monitorID, tenantID)
+	if err != nil {
+		return fmt.Errorf("record ping: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrNotFound
+	}
+
+	// A ping is the recovery signal for a late heartbeat.
+	if _, err := q.Exec(ctx, `UPDATE incidents SET resolved_at = now()
+		WHERE monitor_id = $1 AND tenant_id = $2 AND resolved_at IS NULL`,
+		monitorID, tenantID); err != nil {
+		return fmt.Errorf("resolve heartbeat incident: %w", err)
+	}
+	return nil
 }
 
 func GetMonitor(ctx context.Context, q Querier, tenantID, id string) (Monitor, error) {

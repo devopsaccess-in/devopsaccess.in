@@ -3,6 +3,11 @@
 export type Monitor = {
   id: string;
   name: string;
+  kind: "http" | "heartbeat";
+  period_seconds: number;
+  grace_seconds: number;
+  ping_token: string | null;
+  last_ping_at: string | null;
   url: string;
   method: string;
   interval_seconds: number;
