@@ -111,7 +111,7 @@ with expected status `999`, let it go down, then edit it back to `200`.
 - The incident shows **resolved** with a duration.
 - A **RESOLVED email** arrives; Slack too if configured.
 
-**Result:** ⬜ — first attempt 2026-08-02 was blocked: the dashboard had no
+**Result:** ✅ 2026-08-02 — example.com with expected status 599 went down ("2 consecutive failures: expected status 599, got 200"); editing it back to 200 via Settings → Edit recovered it, RESOLVED email reported "Downtime: 3m20s".
 edit UI at all (only Pause/Delete), so the monitor could not be changed. Fixed
 by adding Settings → Edit; re-run after deploying that.
 
@@ -280,7 +280,7 @@ mismatch is a spam signal — and the domain had no DKIM signature.
 and the alert lands in the **inbox**. Sender reads `support@devopsaccess.in`
 with no Google rewrite.
 
-**Result:** ⬜
+**Result:** ✅ 2026-08-02 — SPF, DKIM and DMARC all PASS; both the DOWN and RESOLVED alerts landed in the **inbox**, sender reads support@devopsaccess.in with no Google rewrite. ALERT_FROM verified on the box.
 
 ---
 
@@ -299,7 +299,7 @@ with no Google rewrite.
   to add a channel. It is not dismissible.
 - (3) both the card and the warning disappear; the page is just monitors.
 
-**Result:** ⬜
+**Result:** ✅ 2026-08-02 — with a channel present and no monitors, the checklist showed step 1 pending and step 2 ticked through. (Follow-up: the duplicate empty-state card was merged into the checklist so only one "add a monitor" CTA remains.)
 
 ---
 

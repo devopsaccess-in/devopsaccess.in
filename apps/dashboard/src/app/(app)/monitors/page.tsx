@@ -79,27 +79,9 @@ export default function MonitorsPage() {
       {monitors.isPending && <p className="font-mono text-sm text-mist-dim">loading…</p>}
       {monitors.isError && <p className="text-alert">{monitors.error.message}</p>}
 
-      {monitors.data?.monitors.length === 0 && (
-        <div className="card">
-          <p className="text-sm text-mist-dim">
-            Two kinds of thing can be watched:
-          </p>
-          <ul className="mt-3 space-y-2 text-sm">
-            <li className="text-mist">
-              <span className="text-white">A website or API</span> — we call it every
-              minute and alert you when it stops answering or returns the wrong status.
-            </li>
-            <li className="text-mist">
-              <span className="text-white">A cron job or backup</span> — it pings a secret
-              URL when it finishes, and we alert you when a run is missed. The failure
-              nobody else catches.
-            </li>
-          </ul>
-          <Link href="/monitors/new" className="btn-primary mt-4">
-            Add your first monitor
-          </Link>
-        </div>
-      )}
+      {/* No empty-state card here: with zero monitors SetupGuide always renders
+          its checklist, whose first step carries the same guidance and CTA.
+          Two cards both saying "add a monitor" is noise. */}
 
       <div className="space-y-3">
         {monitors.data?.monitors.map((m) => (
