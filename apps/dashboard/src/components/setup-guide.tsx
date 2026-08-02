@@ -66,14 +66,24 @@ export function SetupGuide({ compact = false }: { compact?: boolean }) {
     {
       done: hasMonitors,
       title: "Add something to watch",
-      body: "A website or API we check on a schedule, or a cron job that pings us when it finishes.",
+      // Carries the discovery copy for both monitor kinds: this card is the
+      // only thing an empty workspace shows, and heartbeats are otherwise
+      // invisible from the page everyone starts on.
+      body: (
+        <>
+          <span className="text-mist-dim">A website or API</span> — we call it every minute
+          and alert you when it stops answering or returns the wrong status.{" "}
+          <span className="text-mist-dim">A cron job or backup</span> — it pings a secret URL
+          when it finishes, and we alert you when a run is missed.
+        </>
+      ),
       href: "/monitors/new",
       cta: "Add a monitor",
     },
     {
       done: hasChannels,
       title: "Tell us where to send alerts",
-      body: "Email or a Slack webhook. Send a test to prove it works before you rely on it.",
+      body: <>Email or a Slack webhook. Send a test to prove it works before you rely on it.</>,
       href: "/channels",
       cta: "Add a channel",
     },
