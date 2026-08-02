@@ -137,10 +137,51 @@
     path: /etc/grafana/provisioning/datasources
   register: grafana_provisioning
 
+- name: Ensure the Grafana plugin directory exists
+  ansible.builtin.file:
+    path: "{{ grafana_plugins_dir }}"
+    state: directory
+    owner: grafana
+    group: grafana
+    mode: "0755"
+  when: grafana_provisioning.stat.exists
+
 - name: Install the VictoriaLogs Grafana datasource plugin
-  ansible.builtin.command:
-    cmd: grafana-cli plugins install victoriametrics-logs-datasource
-    creates: /var/lib/grafana/plugins/victoriametrics-logs-datasource
+  ansible.builtin.unarchive:
+    src: "https://github.com/VictoriaMetrics/victorialogs-datasource/releases/download/v{{ victorialogs_plugin_version }}/{{ victorialogs_grafana_plugin }}-v{{ victorialogs_plugin_version }}.tar.gz"
+    dest: "{{ grafana_plugins_dir }}"
+    remote_src: true
+    owner: grafana
+    group: grafana
+    creates: "{{ grafana_plugins_dir }}/{{ victorialogs_grafana_plugin }}"
+  notify: Restart grafana
+  when: grafana_provisioning.stat.exists
+
+# The plugin is unsigned, so Grafana will install it and then refuse to load
+# it. Allow it by environment override in a systemd drop-in — grafana.ini is
+# rendered by the monitoring role, and two roles writing one file is a fight
+# waiting to happen.
+- name: Ensure the grafana-server drop-in directory exists
+  ansible.builtin.file:
+    path: /etc/systemd/system/grafana-server.service.d
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+  when: grafana_provisioning.stat.exists
+
+- name: Allow Grafana to load the unsigned VictoriaLogs plugin
+  ansible.builtin.copy:
+    dest: /etc/systemd/system/grafana-server.service.d/10-unsigned-plugins.conf
+    owner: root
+    group: root
+    mode: "0644"
+    content: |
+      # Managed by Ansible (logs role).
+      # The VictoriaLogs datasource is unsigned; without this Grafana loads
+      # everything else and silently skips it.
+      [Service]
+      Environment=GF_PLUGINS_ALLOW_LOADING_UNSIGNED_PLUGINS={{ victorialogs_grafana_plugin }}
   notify: Restart grafana
   when: grafana_provisioning.stat.exists
 

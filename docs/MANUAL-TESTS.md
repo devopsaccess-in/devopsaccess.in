@@ -238,6 +238,9 @@ restart.
 3. Generate traffic: load the dashboard, create and delete a monitor.
 4. In Grafana (grafana.devopsaccess.in) → Explore → **VictoriaLogs**
    datasource. Query `{service="uptime-api.service"}`.
+   If the datasource is missing, the unsigned plugin did not load — check
+   `journalctl -u grafana-server | grep -i unsigned` and confirm the drop-in
+   at /etc/systemd/system/grafana-server.service.d/10-unsigned-plugins.conf.
 5. In the dashboard, open **Activity**.
 6. Check disk: `du -sh /var/lib/victoria-logs && journalctl --disk-usage`
 
