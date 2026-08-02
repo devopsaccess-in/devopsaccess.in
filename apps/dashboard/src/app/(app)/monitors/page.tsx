@@ -3,17 +3,20 @@
 import Link from "next/link";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "@/lib/api";
-import type { CheckResult, Monitor, Uptime } from "@/lib/types";
+import type { Monitor, SeriesPoint, Uptime } from "@/lib/types";
 import { fmtPct, fmtTime } from "@/lib/format";
 import { StateBadge } from "@/components/state-badge";
 import { Sparkline } from "@/components/sparkline";
 import { SetupGuide } from "@/components/setup-guide";
 
 function MonitorRow({ monitor }: { monitor: Monitor }) {
-  const results = useQuery({
-    queryKey: ["results", monitor.id, "24h"],
+  // 40 buckets is exactly what the sparkline draws. Previously this pulled
+  // every raw result in the window — up to ~1,440 rows per monitor, per
+  // refresh — to render the same 40 bars.
+  const series = useQuery({
+    queryKey: ["series", monitor.id, "24h", 40],
     queryFn: () =>
-      api<{ results: CheckResult[] }>(`/api/monitors/${monitor.id}/results?window=24h`),
+      api<{ buckets: SeriesPoint[] }>(`/api/monitors/${monitor.id}/series?window=24h&buckets=40`),
   });
   const uptime = useQuery({
     queryKey: ["uptime", monitor.id, "7d"],
@@ -53,7 +56,7 @@ function MonitorRow({ monitor }: { monitor: Monitor }) {
           </div>
           <div className="text-xs text-mist-faint">7d uptime</div>
         </div>
-        <Sparkline results={results.data?.results ?? []} />
+        <Sparkline buckets={series.data?.buckets ?? []} />
       </div>
     </Link>
   );

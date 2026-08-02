@@ -303,6 +303,26 @@ with no Google rewrite.
 
 ---
 
+## MT-17 — Chart ranges and dashboard responsiveness
+**Depends on:** a monitor with a few hours of history.
+1. Open a monitor with some history. Above the response-time chart, click
+   through the ranges: **1h, 6h, 12h, 24h, 2d, 7d, 14d, 30d**.
+2. Watch the network tab while switching (DevTools → Network).
+3. Go back to /monitors with several monitors present and let it sit a minute.
+
+**Expected:**
+- Each range redraws quickly; longer ranges are coarser, not slower.
+- Each switch fetches **one** `/series` request of roughly 10 KB, whatever the
+  range — not a payload that grows with history.
+- Hovering the chart shows avg/peak latency and the ok/failed counts for that
+  bucket; buckets containing a failure are marked in red at the top.
+- The monitors list no longer stutters on refresh; each row fetches a ~4 KB
+  series rather than the full day of raw results.
+
+**Result:** ⬜
+
+---
+
 ## MT-9 — Cleanup
 1. Delete the test monitors (health-probe-up, health-probe-down) and the test
    channels.

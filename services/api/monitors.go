@@ -412,10 +412,22 @@ func (s *server) monitorResults(w http.ResponseWriter, r *http.Request) {
 		s.writeError(w, http.StatusNotFound, "not found")
 		return
 	}
-	window, err := parseWindow(r.URL.Query().Get("window"), 24*time.Hour, 7*24*time.Hour)
+	window, err := parseWindow(r.URL.Query().Get("window"), 24*time.Hour, maxSeriesWindow)
 	if err != nil {
 		s.writeError(w, http.StatusBadRequest, err.Error())
 		return
+	}
+	// Raw rows are for reading individual checks (the latest result's phase
+	// breakdown), not for drawing charts — /series does that. Default small
+	// and cap hard so this endpoint can't be used to pull a whole month.
+	limit := 200
+	if v := r.URL.Query().Get("limit"); v != "" {
+		n, err := strconv.Atoi(v)
+		if err != nil || n < 1 || n > 1000 {
+			s.writeError(w, http.StatusBadRequest, "limit must be between 1 and 1000")
+			return
+		}
+		limit = n
 	}
 
 	var results []store.Result
@@ -426,7 +438,7 @@ func (s *server) monitorResults(w http.ResponseWriter, r *http.Request) {
 			return err
 		}
 		var err error
-		results, err = store.ListResults(r.Context(), tx, tenantID(r.Context()), id, time.Now().Add(-window), 5000)
+		results, err = store.ListResults(r.Context(), tx, tenantID(r.Context()), id, time.Now().Add(-window), limit)
 		return err
 	})
 	if err != nil {
@@ -469,7 +481,7 @@ func (s *server) monitorUptime(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, resp)
 }
 
-// parseWindow parses "24h" / "7d" style windows, clamping to max.
+// parseWindow parses "30m" / "24h" / "7d" style windows, clamping to max.
 func parseWindow(s string, def, max time.Duration) (time.Duration, error) {
 	if s == "" {
 		return def, nil
@@ -480,16 +492,67 @@ func parseWindow(s string, def, max time.Duration) (time.Duration, error) {
 		unit = 24 * time.Hour
 	case strings.HasSuffix(s, "h"):
 		unit = time.Hour
+	case strings.HasSuffix(s, "m"):
+		unit = time.Minute
 	default:
-		return 0, fmt.Errorf("window must look like 24h or 7d")
+		return 0, fmt.Errorf("window must look like 30m, 24h or 7d")
 	}
 	n, err := strconv.Atoi(s[:len(s)-1])
 	if err != nil || n <= 0 {
-		return 0, fmt.Errorf("window must look like 24h or 7d")
+		return 0, fmt.Errorf("window must look like 30m, 24h or 7d")
 	}
 	w := time.Duration(n) * unit
 	if w > max {
 		return 0, fmt.Errorf("window too large (max %s)", max)
 	}
 	return w, nil
+}
+
+// maxSeriesWindow bounds how far back a chart can ask. Matches the 30-day
+// monitor_results retention — asking for more would return a misleadingly
+// empty stretch.
+const maxSeriesWindow = 30 * 24 * time.Hour
+
+// monitorSeries returns the monitor's results aggregated into time buckets.
+// Charts use this instead of /results: a 30-day window is tens of thousands of
+// rows raw, but a fixed ~120 points bucketed, which is all a chart can draw.
+func (s *server) monitorSeries(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	if !isUUID(id) {
+		s.writeError(w, http.StatusNotFound, "not found")
+		return
+	}
+	window, err := parseWindow(r.URL.Query().Get("window"), 24*time.Hour, maxSeriesWindow)
+	if err != nil {
+		s.writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	buckets := 120
+	if v := r.URL.Query().Get("buckets"); v != "" {
+		n, err := strconv.Atoi(v)
+		if err != nil || n < 1 || n > 500 {
+			s.writeError(w, http.StatusBadRequest, "buckets must be between 1 and 500")
+			return
+		}
+		buckets = n
+	}
+
+	var points []store.SeriesPoint
+	err = db.WithTenant(r.Context(), s.pool, tenantID(r.Context()), func(tx pgx.Tx) error {
+		if _, err := store.GetMonitor(r.Context(), tx, tenantID(r.Context()), id); err != nil {
+			return err
+		}
+		var err error
+		points, err = store.Series(r.Context(), tx, tenantID(r.Context()), id,
+			time.Now().Add(-window), buckets)
+		return err
+	})
+	if err != nil {
+		s.storeError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"window":  window.String(),
+		"buckets": points,
+	})
 }

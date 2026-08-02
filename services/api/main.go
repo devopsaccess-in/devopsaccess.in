@@ -96,6 +96,7 @@ func main() {
 				mr.Patch("/{id}", s.updateMonitor)
 				mr.Delete("/{id}", s.deleteMonitor)
 				mr.Get("/{id}/results", s.monitorResults)
+				mr.Get("/{id}/series", s.monitorSeries)
 				mr.Get("/{id}/uptime", s.monitorUptime)
 			})
 			tr.Patch("/api/settings", s.updateSettings)

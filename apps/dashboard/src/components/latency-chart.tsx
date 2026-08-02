@@ -1,16 +1,19 @@
 "use client";
 
 import { useMemo, useRef, useState } from "react";
-import type { CheckResult } from "@/lib/types";
+import type { SeriesPoint } from "@/lib/types";
 import { fmtTime } from "@/lib/format";
 
-type Point = { x: number; y: number; r: CheckResult };
+type Point = { x: number; y: number; b: SeriesPoint };
 
-// Single-series latency line (teal, 2px) with failed checks overlaid as red
-// markers at the failure's observed latency (timeouts sit at the top).
-// Single series → no legend box; the card title names it (dataviz rule).
-// Hover shows a crosshair + tooltip; grid is recessive.
-export function LatencyChart({ results }: { results: CheckResult[] }) {
+// Average response time per bucket (teal, 2px), with buckets containing a
+// failure marked in red at the top of the plot. Single series → no legend box;
+// the card title names it. Hover gives a crosshair + tooltip. Grid is
+// recessive.
+//
+// Consumes aggregated buckets, so the payload is a fixed ~120 points whether
+// the range is an hour or a month.
+export function LatencyChart({ buckets }: { buckets: SeriesPoint[] }) {
   const [hover, setHover] = useState<Point | null>(null);
   const svgRef = useRef<SVGSVGElement>(null);
 
@@ -18,43 +21,54 @@ export function LatencyChart({ results }: { results: CheckResult[] }) {
   const H = 180;
   const PAD = { top: 12, right: 12, bottom: 24, left: 48 };
 
-  const { points, yMax, ticks } = useMemo(() => {
-    // Oldest → newest, keep only checks that measured a latency.
-    const data = [...results].reverse().filter((r) => r.latency_ms !== null);
-    const rawMax = Math.max(100, ...data.map((r) => r.latency_ms ?? 0));
+  const { points, failures, ticks, yMax } = useMemo(() => {
+    const withLatency = buckets.filter((b) => b.avg_ms !== null);
+    const rawMax = Math.max(100, ...withLatency.map((b) => b.avg_ms ?? 0));
     const yMax = Math.ceil(rawMax / 100) * 100;
     const innerW = W - PAD.left - PAD.right;
     const innerH = H - PAD.top - PAD.bottom;
-    const points: Point[] = data.map((r, i) => ({
-      x: PAD.left + (data.length === 1 ? innerW / 2 : (i / (data.length - 1)) * innerW),
-      y: PAD.top + innerH - ((r.latency_ms ?? 0) / yMax) * innerH,
-      r,
-    }));
+
+    // x is positioned by index across all buckets so gaps in latency (an
+    // all-failed bucket) don't distort the time axis.
+    const xAt = (i: number) =>
+      PAD.left + (buckets.length === 1 ? innerW / 2 : (i / (buckets.length - 1)) * innerW);
+
+    const points: Point[] = [];
+    const failures: Point[] = [];
+    buckets.forEach((b, i) => {
+      const x = xAt(i);
+      if (b.avg_ms !== null) {
+        points.push({ x, y: PAD.top + innerH - (b.avg_ms / yMax) * innerH, b });
+      }
+      if (b.fail > 0) {
+        failures.push({ x, y: PAD.top + 4, b });
+      }
+    });
+
     const ticks = [0, 0.5, 1].map((f) => ({
       y: PAD.top + innerH - f * innerH,
       label: `${Math.round(f * yMax)}ms`,
     }));
-    return { points, yMax, ticks };
-  }, [results]);
+    return { points, failures, ticks, yMax };
+  }, [buckets]);
 
-  if (points.length === 0) {
+  if (buckets.length === 0) {
     return (
       <div className="flex h-44 items-center justify-center font-mono text-sm text-mist-faint">
-        no latency data in this window
+        no data in this range
       </div>
     );
   }
 
-  const okPath = points
+  const path = points
     .map((p, i) => `${i === 0 ? "M" : "L"}${p.x.toFixed(1)},${p.y.toFixed(1)}`)
     .join(" ");
-  const fails = points.filter((p) => !p.r.ok);
 
   function onMove(e: React.MouseEvent<SVGSVGElement>) {
     const rect = svgRef.current?.getBoundingClientRect();
-    if (!rect) return;
+    if (!rect || points.length === 0) return;
     const x = ((e.clientX - rect.left) / rect.width) * W;
-    let best: Point = points[0];
+    let best = points[0];
     for (const p of points) {
       if (Math.abs(p.x - x) < Math.abs(best.x - x)) best = p;
     }
@@ -68,11 +82,10 @@ export function LatencyChart({ results }: { results: CheckResult[] }) {
         viewBox={`0 0 ${W} ${H}`}
         className="w-full"
         role="img"
-        aria-label={`Response time, max ${yMax}ms`}
+        aria-label={`Average response time, peak ${yMax}ms`}
         onMouseMove={onMove}
         onMouseLeave={() => setHover(null)}
       >
-        {/* recessive grid + axis labels in text tokens */}
         {ticks.map((t) => (
           <g key={t.y}>
             <line
@@ -83,16 +96,26 @@ export function LatencyChart({ results }: { results: CheckResult[] }) {
               className="stroke-ink-line"
               strokeWidth={1}
             />
-            <text x={PAD.left - 8} y={t.y + 3} textAnchor="end" className="fill-mist-faint font-mono text-[10px]">
+            <text
+              x={PAD.left - 8}
+              y={t.y + 3}
+              textAnchor="end"
+              className="fill-mist-faint font-mono text-[10px]"
+            >
               {t.label}
             </text>
           </g>
         ))}
         <text x={PAD.left} y={H - 6} className="fill-mist-faint font-mono text-[10px]">
-          {fmtTime(points[0].r.checked_at)}
+          {fmtTime(buckets[0].t)}
         </text>
-        <text x={W - PAD.right} y={H - 6} textAnchor="end" className="fill-mist-faint font-mono text-[10px]">
-          {fmtTime(points[points.length - 1].r.checked_at)}
+        <text
+          x={W - PAD.right}
+          y={H - 6}
+          textAnchor="end"
+          className="fill-mist-faint font-mono text-[10px]"
+        >
+          {fmtTime(buckets[buckets.length - 1].t)}
         </text>
 
         {hover && (
@@ -107,11 +130,20 @@ export function LatencyChart({ results }: { results: CheckResult[] }) {
           />
         )}
 
-        <path d={okPath} fill="none" className="stroke-node" strokeWidth={2} />
+        {points.length > 1 && (
+          <path d={path} fill="none" className="stroke-node" strokeWidth={2} />
+        )}
 
-        {/* failures: red markers with a 2px surface ring so they read over the line */}
-        {fails.map((p) => (
-          <circle key={p.r.id} cx={p.x} cy={p.y} r={4} className="fill-alert stroke-ink-card" strokeWidth={2} />
+        {/* Buckets containing a failure, pinned to the top with a surface ring. */}
+        {failures.map((p) => (
+          <circle
+            key={`f-${p.b.t}`}
+            cx={p.x}
+            cy={p.y}
+            r={4}
+            className="fill-alert stroke-ink-card"
+            strokeWidth={2}
+          />
         ))}
 
         {hover && (
@@ -124,12 +156,17 @@ export function LatencyChart({ results }: { results: CheckResult[] }) {
           className="pointer-events-none absolute -top-2 z-10 -translate-x-1/2 -translate-y-full rounded-md border border-ink-line bg-ink-soft px-3 py-2 font-mono text-xs shadow-lg"
           style={{ left: `${(hover.x / W) * 100}%` }}
         >
-          <div className="text-mist">{fmtTime(hover.r.checked_at)}</div>
-          <div className={hover.r.ok ? "text-node" : "text-alert"}>
-            {hover.r.ok ? "ok" : "failed"} · {hover.r.latency_ms}ms
-            {hover.r.status_code !== null ? ` · HTTP ${hover.r.status_code}` : ""}
+          <div className="text-mist">{fmtTime(hover.b.t)}</div>
+          <div className="text-node">
+            {hover.b.avg_ms}ms avg
+            {hover.b.max_ms !== null && hover.b.max_ms !== hover.b.avg_ms
+              ? ` · ${hover.b.max_ms}ms peak`
+              : ""}
           </div>
-          {hover.r.error && <div className="max-w-56 truncate text-mist-dim">{hover.r.error}</div>}
+          <div className={hover.b.fail > 0 ? "text-alert" : "text-mist-dim"}>
+            {hover.b.ok} ok{hover.b.fail > 0 ? ` · ${hover.b.fail} failed` : ""}
+            {hover.b.phase ? ` (${hover.b.phase})` : ""}
+          </div>
         </div>
       )}
     </div>
