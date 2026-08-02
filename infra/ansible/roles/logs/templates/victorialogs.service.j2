@@ -1,0 +1,31 @@
+[Unit]
+Description=VictoriaLogs log store
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=victorialogs
+Group=victorialogs
+ExecStart=/usr/local/bin/victoria-logs-prod \
+    -httpListenAddr={{ victorialogs_listen }} \
+    -storageDataPath={{ victorialogs_data_dir }} \
+    -retentionPeriod={{ victorialogs_retention }} \
+    -retention.maxDiskSpaceUsageBytes={{ victorialogs_max_disk }}
+Restart=on-failure
+RestartSec=5
+
+# Hardening — needs only its data directory and the loopback listener.
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectControlGroups=true
+RestrictAddressFamilies=AF_INET AF_INET6
+ReadWritePaths={{ victorialogs_data_dir }}
+CapabilityBoundingSet=
+AmbientCapabilities=
+
+[Install]
+WantedBy=multi-user.target

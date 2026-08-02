@@ -145,7 +145,13 @@ Budget check: VM ~₹400 + Cloudflare free + Auth0 free + Terraform Cloud
 free + GitHub free = **well under the ₹10,000/mo cap**, leaving room for
 the paid tiers of nothing. Good.
 
-## 6. Logging & audit system (build right after shipping, before inviting users)
+## 6. Logging & audit system — BUILT 2026-08-02 (branch feat/audit-and-logging)
+
+Status: 6.1 and 6.2 are implemented and tested; 6.3 remains a decision.
+Deploy with Configure Server `tags=logs`, then walk MT-14. The original design
+follows, kept for context.
+
+
 
 Three layers, smallest-possible footprint, all self-hosted:
 

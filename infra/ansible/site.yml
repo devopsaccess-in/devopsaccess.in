@@ -12,6 +12,7 @@
 #   7. contact_api    — Go contact/waitlist/payment relay behind nginx /api/
 #   8. monitoring     — node_exporter + Prometheus + Grafana (grafana subdomain)
 #   9. deploy_site    — copy the built Astro dist/ into the webroot
+#   9b. logs          — VictoriaLogs + vector (journald + nginx → Grafana)
 #  10. app_api        — uptime control-plane API (app.devopsaccess.in /api/)
 #  11. app_scheduler  — uptime prober + alerter (no listener)
 #  12. app_dashboard  — Next.js dashboard (node, app.devopsaccess.in /)
@@ -49,6 +50,8 @@
       tags: [contact]
     - role: monitoring
       tags: [monitoring]
+    - role: logs
+      tags: [logs, monitoring]
     - role: deploy_site
       tags: [deploy]
     - role: app_api

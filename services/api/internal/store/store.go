@@ -577,6 +577,18 @@ func EnsureUser(ctx context.Context, pool *pgxpool.Pool, sub, email, name string
 		VALUES ($1, $2, 'owner')`, t.ID, u.ID); err != nil {
 		return User{}, Tenant{}, fmt.Errorf("insert membership: %w", err)
 	}
+
+	// Open the workspace's audit trail with its own creation. audit_log has
+	// RLS, and this transaction has no tenant context yet (the tenant is being
+	// created in it), so set one for the remainder of the transaction.
+	if _, err := tx.Exec(ctx, `SELECT set_config('app.tenant_id', $1, true)`, t.ID); err != nil {
+		return User{}, Tenant{}, fmt.Errorf("set tenant for audit: %w", err)
+	}
+	if err := Audit(ctx, tx, t.ID, Actor{Sub: sub, Email: email}, ActionUserFirstLogin,
+		fmt.Sprintf("workspace %q created on first login", t.Slug), nil,
+		map[string]any{"slug": t.Slug}); err != nil {
+		return User{}, Tenant{}, err
+	}
 	if err := tx.Commit(ctx); err != nil {
 		return User{}, Tenant{}, fmt.Errorf("commit provisioning: %w", err)
 	}

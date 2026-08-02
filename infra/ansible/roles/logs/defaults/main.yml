@@ -1,0 +1,17 @@
+---
+# VictoriaLogs — the log store for the whole box. Chosen over Loki for a 4 GB
+# VM: single static binary, Apache-2.0, no object store or index shipper, and
+# roughly an order of magnitude less RAM at our ingest volume (see
+# docs/LAUNCH-PLAN.md §8). Binds to localhost; queried through the existing
+# Grafana, never exposed directly.
+victorialogs_version: "1.51.0"
+victorialogs_listen: "127.0.0.1:9428"
+victorialogs_retention: "30d"
+# Hard ceiling on disk so logs can never fill the volume out from under
+# Postgres. VictoriaLogs drops the oldest data when it hits this.
+victorialogs_max_disk: "3GiB"
+victorialogs_data_dir: /var/lib/victoria-logs
+
+# vector tails the systemd journal (all four Go services log JSON to stderr →
+# journald) and nginx's access logs, and ships both to VictoriaLogs.
+vector_version: "0.49.0"

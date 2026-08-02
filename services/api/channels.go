@@ -49,13 +49,38 @@ func (s *server) createChannel(w http.ResponseWriter, r *http.Request) {
 	err = db.WithTenant(r.Context(), s.pool, tenantID(r.Context()), func(tx pgx.Tx) error {
 		var err error
 		c, err = store.CreateChannel(r.Context(), tx, tenantID(r.Context()), in.Type, config)
-		return err
+		if err != nil {
+			return err
+		}
+		return store.Audit(r.Context(), tx, tenantID(r.Context()), actor(r.Context()),
+			store.ActionChannelCreate,
+			fmt.Sprintf("added %s alert channel (%s)", c.Type, channelTargetLabel(c)),
+			&c.ID, map[string]any{"type": c.Type})
 	})
 	if err != nil {
 		s.serverError(w, r, err)
 		return
 	}
 	writeJSON(w, http.StatusCreated, c)
+}
+
+// channelTargetLabel names a channel for the audit trail without leaking the
+// secret: an email address is the user's own and safe to show, but a Slack
+// webhook URL is a credential — only its host goes in the log.
+func channelTargetLabel(c store.Channel) string {
+	switch c.Type {
+	case "email":
+		to, _ := c.Config["to"].(string)
+		return to
+	case "slack_webhook":
+		raw, _ := c.Config["url"].(string)
+		if u, err := url.Parse(raw); err == nil && u.Host != "" {
+			return u.Host
+		}
+		return "webhook"
+	default:
+		return c.Type
+	}
 }
 
 // validateChannel checks the type-specific config and returns it with only
@@ -90,7 +115,17 @@ func (s *server) deleteChannel(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	err := db.WithTenant(r.Context(), s.pool, tenantID(r.Context()), func(tx pgx.Tx) error {
-		return store.DeleteChannel(r.Context(), tx, tenantID(r.Context()), id)
+		c, err := store.GetChannel(r.Context(), tx, tenantID(r.Context()), id)
+		if err != nil {
+			return err
+		}
+		if err := store.DeleteChannel(r.Context(), tx, tenantID(r.Context()), id); err != nil {
+			return err
+		}
+		return store.Audit(r.Context(), tx, tenantID(r.Context()), actor(r.Context()),
+			store.ActionChannelDelete,
+			fmt.Sprintf("removed %s alert channel (%s)", c.Type, channelTargetLabel(c)),
+			nil, map[string]any{"type": c.Type, "channel_id": c.ID})
 	})
 	if err != nil {
 		s.storeError(w, r, err)
@@ -131,8 +166,26 @@ func (s *server) testChannel(w http.ResponseWriter, r *http.Request) {
 		s.writeError(w, http.StatusBadRequest, "unknown channel type")
 		return
 	}
-	if err != nil {
-		s.log.Warn().Err(err).Str("channel_id", id).Msg("channel test failed")
+	// Audit the attempt either way: a test send leaves our relay, so the trail
+	// should show who triggered it and whether it landed.
+	sendErr := err
+	auditErr := db.WithTenant(r.Context(), s.pool, tenantID(r.Context()), func(tx pgx.Tx) error {
+		outcome := "delivered"
+		if sendErr != nil {
+			outcome = "failed"
+		}
+		return store.Audit(r.Context(), tx, tenantID(r.Context()), actor(r.Context()),
+			store.ActionChannelTest,
+			fmt.Sprintf("sent a test alert to %s channel (%s) — %s",
+				c.Type, channelTargetLabel(c), outcome),
+			&c.ID, map[string]any{"type": c.Type, "delivered": sendErr == nil})
+	})
+	if auditErr != nil {
+		s.log.Error().Err(auditErr).Str("channel_id", id).Msg("audit channel test failed")
+	}
+
+	if sendErr != nil {
+		s.log.Warn().Err(sendErr).Str("channel_id", id).Msg("channel test failed")
 		s.writeError(w, http.StatusBadGateway, "test notification failed to send")
 		return
 	}

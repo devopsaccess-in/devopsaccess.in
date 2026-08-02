@@ -3,6 +3,10 @@ package main
 import (
 	"net/http"
 
+	"github.com/jackc/pgx/v5"
+
+	"github.com/devopsaccess-in/devopsaccess.in/services/shared/db"
+
 	"github.com/devopsaccess-in/devopsaccess.in/services/api/internal/auth"
 	"github.com/devopsaccess-in/devopsaccess.in/services/api/internal/store"
 )
@@ -44,9 +48,37 @@ func (s *server) updateSettings(w http.ResponseWriter, r *http.Request) {
 		s.writeError(w, http.StatusBadRequest, "no settings to update")
 		return
 	}
-	if err := store.SetPublicStatus(r.Context(), s.pool, tenantID(r.Context()), *in.PublicStatusEnabled); err != nil {
+	err := db.WithTenant(r.Context(), s.pool, tenantID(r.Context()), func(tx pgx.Tx) error {
+		if err := store.SetPublicStatus(r.Context(), tx, tenantID(r.Context()), *in.PublicStatusEnabled); err != nil {
+			return err
+		}
+		state := "enabled"
+		if !*in.PublicStatusEnabled {
+			state = "disabled"
+		}
+		return store.Audit(r.Context(), tx, tenantID(r.Context()), actor(r.Context()),
+			store.ActionSettingsUpdate,
+			"public status page "+state,
+			nil, map[string]any{"public_status_enabled": *in.PublicStatusEnabled})
+	})
+	if err != nil {
 		s.storeError(w, r, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]bool{"public_status_enabled": *in.PublicStatusEnabled})
+}
+
+// listAudit returns the tenant's activity trail — who changed what, when.
+func (s *server) listAudit(w http.ResponseWriter, r *http.Request) {
+	var entries []store.AuditEntry
+	err := db.WithTenant(r.Context(), s.pool, tenantID(r.Context()), func(tx pgx.Tx) error {
+		var err error
+		entries, err = store.ListAudit(r.Context(), tx, tenantID(r.Context()), 200)
+		return err
+	})
+	if err != nil {
+		s.serverError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"entries": entries})
 }

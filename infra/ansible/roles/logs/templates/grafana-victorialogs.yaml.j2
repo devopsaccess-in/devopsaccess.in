@@ -1,0 +1,12 @@
+# Managed by Ansible (logs role).
+apiVersion: 1
+
+datasources:
+  - name: VictoriaLogs
+    type: victoriametrics-logs-datasource
+    access: proxy
+    url: http://{{ victorialogs_listen }}
+    isDefault: false
+    editable: false
+    jsonData:
+      maxLines: 1000

@@ -1,0 +1,22 @@
+---
+- name: Restart victorialogs
+  ansible.builtin.systemd_service:
+    name: victorialogs
+    state: restarted
+    daemon_reload: true
+
+- name: Restart vector
+  ansible.builtin.systemd_service:
+    name: vector
+    state: restarted
+    daemon_reload: true
+
+- name: Restart journald
+  ansible.builtin.systemd_service:
+    name: systemd-journald
+    state: restarted
+
+- name: Restart grafana
+  ansible.builtin.systemd_service:
+    name: grafana-server
+    state: restarted
