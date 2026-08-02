@@ -3,6 +3,7 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useMe } from "@/app/(app)/providers";
 import { api } from "@/lib/api";
+import { track } from "@/lib/analytics";
 
 export default function SettingsPage() {
   const me = useMe();
@@ -18,7 +19,12 @@ export default function SettingsPage() {
         method: "PATCH",
         body: JSON.stringify({ public_status_enabled: next }),
       }),
-    onSuccess: () => void qc.invalidateQueries({ queryKey: ["me"] }),
+    onSuccess: (_data, next) => {
+      // Only the enabling direction is a funnel step — that is the moment a
+      // customer decides the product is worth showing their own users.
+      if (next) track("status_page_enabled");
+      void qc.invalidateQueries({ queryKey: ["me"] });
+    },
   });
 
   return (

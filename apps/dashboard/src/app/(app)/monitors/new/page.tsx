@@ -5,6 +5,7 @@ import { useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/lib/api";
 import type { Monitor } from "@/lib/types";
+import { track } from "@/lib/analytics";
 
 export default function NewMonitorPage() {
   const router = useRouter();
@@ -36,6 +37,7 @@ export default function NewMonitorPage() {
       return api<Monitor>("/api/monitors", { method: "POST", body: JSON.stringify(body) });
     },
     onSuccess: (m) => {
+      track("monitor_created", { kind });
       void qc.invalidateQueries({ queryKey: ["monitors"] });
       // A heartbeat is useless until you wire up its ping URL, so go straight
       // to the detail page where the snippets live.

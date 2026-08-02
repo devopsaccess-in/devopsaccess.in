@@ -326,6 +326,29 @@ with no Google rewrite.
 
 ---
 
+## MT-18 — Activation analytics and consent
+**Depends on:** POSTHOG_KEY set as a repo secret, PostHog project reachable.
+1. Open the dashboard in a fresh/incognito session → a consent bar appears.
+2. Click **No thanks**. Create a monitor. Check the browser Network tab.
+3. Clear site data, reload, click **Allow** this time.
+4. Create a monitor, add a channel, send a test, enable the status page.
+5. In PostHog → Activity/Live events.
+
+**Expected:**
+- (2) declining means **no** requests to the PostHog host at all.
+- (4)/(5) exactly these events appear: `monitor_created`, `channel_created`,
+  `channel_tested`, `status_page_enabled` (and `signup_completed` for a new
+  workspace, `incident_viewed` once an incident exists).
+- Events carry only coarse properties (`kind`, `type`, `delivered`, `count`) —
+  **no** monitor URLs, alert addresses, ping tokens, or emails.
+- No `$autocapture` or `$pageview` events, and no session recordings — the
+  dashboard shows customer infrastructure and must not record it.
+- The person is identified by opaque ids (user id, tenant id/slug) only.
+
+**Result:** ⬜
+
+---
+
 ## MT-9 — Cleanup
 1. Delete the test monitors (health-probe-up, health-probe-down) and the test
    channels.

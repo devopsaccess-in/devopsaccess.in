@@ -5,6 +5,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/lib/api";
 import type { Channel } from "@/lib/types";
 import { ConfirmDialog } from "@/components/confirm-dialog";
+import { track } from "@/lib/analytics";
 
 export default function ChannelsPage() {
   const qc = useQueryClient();
@@ -28,6 +29,7 @@ export default function ChannelsPage() {
         }),
       }),
     onSuccess: () => {
+      track("channel_created", { type });
       setValue("");
       void qc.invalidateQueries({ queryKey: ["channels"] });
     },
@@ -44,8 +46,14 @@ export default function ChannelsPage() {
   const test = useMutation({
     mutationFn: (id: string) => api<{ ok: boolean }>(`/api/channels/${id}/test`, { method: "POST" }),
     onMutate: (id) => setTestResult((r) => ({ ...r, [id]: "sending…" })),
-    onSuccess: (_data, id) => setTestResult((r) => ({ ...r, [id]: "sent ✓" })),
-    onError: (err, id) => setTestResult((r) => ({ ...r, [id]: err.message })),
+    onSuccess: (_data, id) => {
+      track("channel_tested", { delivered: true });
+      setTestResult((r) => ({ ...r, [id]: "sent ✓" }));
+    },
+    onError: (err, id) => {
+      track("channel_tested", { delivered: false });
+      setTestResult((r) => ({ ...r, [id]: err.message }));
+    },
   });
 
   return (

@@ -1,9 +1,11 @@
 "use client";
 
 import { QueryClient, QueryClientProvider, useQuery } from "@tanstack/react-query";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { api } from "@/lib/api";
 import type { Me } from "@/lib/types";
+import { identify, track } from "@/lib/analytics";
+import { ConsentBanner } from "@/components/consent-banner";
 
 export function useMe() {
   return useQuery({
@@ -18,6 +20,23 @@ export function useMe() {
 // has happened once.
 function Bootstrap({ children }: { children: React.ReactNode }) {
   const me = useMe();
+  const announced = useRef(false);
+
+  useEffect(() => {
+    if (!me.data || announced.current) return;
+    announced.current = true;
+
+    const { user, tenant } = me.data;
+    identify(user.id, tenant.id, tenant.slug);
+
+    // /api/me provisions the workspace on first login, so a tenant created
+    // moments ago means this is that first login. Cheaper and less fragile
+    // than threading a "created" flag through the API for one event.
+    if (Date.now() - new Date(tenant.created_at).getTime() < 60_000) {
+      track("signup_completed");
+    }
+  }, [me.data]);
+
   if (me.isPending) {
     return (
       <div className="flex min-h-screen items-center justify-center font-mono text-sm text-mist-dim">
@@ -50,6 +69,7 @@ export function Providers({ children }: { children: React.ReactNode }) {
   return (
     <QueryClientProvider client={client}>
       <Bootstrap>{children}</Bootstrap>
+      <ConsentBanner />
     </QueryClientProvider>
   );
 }
