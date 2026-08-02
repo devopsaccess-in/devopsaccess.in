@@ -145,6 +145,89 @@ func TestMonitorValidation(t *testing.T) {
 	}
 }
 
+// FEATURES.md: editing a monitor after creation (fix a typo'd URL, retune the
+// cadence). The API side of the dashboard's Settings form.
+func TestEditMonitor(t *testing.T) {
+	c := newClient(t, uniqueSub("edit"), "edit@a.in", "")
+	c.mustDo(t, "GET", "/api/me", nil, nil, http.StatusOK)
+
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer target.Close()
+
+	var m struct {
+		ID               string `json:"id"`
+		Name             string `json:"name"`
+		URL              string `json:"url"`
+		Method           string `json:"method"`
+		IntervalSeconds  int    `json:"interval_seconds"`
+		ExpectedStatus   int    `json:"expected_status"`
+		FailureThreshold int    `json:"failure_threshold"`
+		PeriodSeconds    int    `json:"period_seconds"`
+		GraceSeconds     int    `json:"grace_seconds"`
+	}
+	c.mustDo(t, "POST", "/api/monitors", monitorPayload("before edit", target.URL, 2), &m, http.StatusCreated)
+
+	// Every editable http field, in one patch.
+	c.mustDo(t, "PATCH", "/api/monitors/"+m.ID, map[string]any{
+		"name": "after edit", "method": "HEAD", "interval_seconds": 300,
+		"expected_status": 204, "failure_threshold": 5,
+	}, &m, http.StatusOK)
+
+	if m.Name != "after edit" || m.Method != "HEAD" || m.IntervalSeconds != 300 ||
+		m.ExpectedStatus != 204 || m.FailureThreshold != 5 {
+		t.Fatalf("edit did not apply: %+v", m)
+	}
+
+	// A partial patch must leave everything else alone.
+	c.mustDo(t, "PATCH", "/api/monitors/"+m.ID, map[string]any{"name": "renamed"}, &m, http.StatusOK)
+	if m.Name != "renamed" || m.IntervalSeconds != 300 || m.ExpectedStatus != 204 {
+		t.Fatalf("partial patch clobbered other fields: %+v", m)
+	}
+
+	// Invalid values are rejected, and reject means unchanged.
+	for _, bad := range []map[string]any{
+		{"interval_seconds": 30},
+		{"expected_status": 999},
+		{"failure_threshold": 50},
+		{"method": "DELETE"},
+		{"url": "ftp://example.com"},
+		{"name": "bad\r\nBcc: x@y.z"},
+	} {
+		if s := c.do(t, "PATCH", "/api/monitors/"+m.ID, bad, nil); s != http.StatusBadRequest {
+			t.Errorf("PATCH %v = %d, want 400", bad, s)
+		}
+	}
+	c.mustDo(t, "GET", "/api/monitors/"+m.ID, nil, &m, http.StatusOK)
+	if m.Name != "renamed" || m.IntervalSeconds != 300 {
+		t.Fatalf("rejected patches leaked changes: %+v", m)
+	}
+
+	// Heartbeat cadence is editable too.
+	var hb struct {
+		ID            string `json:"id"`
+		PeriodSeconds int    `json:"period_seconds"`
+		GraceSeconds  int    `json:"grace_seconds"`
+	}
+	c.mustDo(t, "POST", "/api/monitors", map[string]any{
+		"name": "editable heartbeat", "kind": "heartbeat",
+		"period_seconds": 3600, "grace_seconds": 300,
+	}, &hb, http.StatusCreated)
+	c.mustDo(t, "PATCH", "/api/monitors/"+hb.ID, map[string]any{
+		"period_seconds": 86400, "grace_seconds": 3600,
+	}, &hb, http.StatusOK)
+	if hb.PeriodSeconds != 86400 || hb.GraceSeconds != 3600 {
+		t.Fatalf("heartbeat cadence edit did not apply: %+v", hb)
+	}
+	if s := c.do(t, "PATCH", "/api/monitors/"+hb.ID, map[string]any{"period_seconds": 10}, nil); s != http.StatusBadRequest {
+		t.Errorf("too-short period = %d, want 400", s)
+	}
+
+	c.mustDo(t, "DELETE", "/api/monitors/"+m.ID, nil, nil, http.StatusNoContent)
+	c.mustDo(t, "DELETE", "/api/monitors/"+hb.ID, nil, nil, http.StatusNoContent)
+}
+
 // FEATURES.md: the full incident pipeline — checks, threshold crossing,
 // incident, email + Slack alerts, recovery notice, uptime + results windows,
 // public status API. This is the E2E-gate flow with local stand-ins.

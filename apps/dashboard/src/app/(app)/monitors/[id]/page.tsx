@@ -12,6 +12,7 @@ import { LatencyChart } from "@/components/latency-chart";
 import { EmbedBadge } from "@/components/embed-badge";
 import { PhaseBreakdown, TLSChip } from "@/components/phase-breakdown";
 import { PingURL, fmtSeconds } from "@/components/ping-url";
+import { EditMonitor } from "@/components/edit-monitor";
 
 function UptimeTile({ id, window: w }: { id: string; window: string }) {
   const uptime = useQuery({
@@ -162,6 +163,8 @@ export default function MonitorDetailPage({ params }: { params: Promise<{ id: st
           ))}
         </ul>
       </div>
+
+      <EditMonitor key={m.updated_at} monitor={m} />
 
       <EmbedBadge monitorId={id} />
 
