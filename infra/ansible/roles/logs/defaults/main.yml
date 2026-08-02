@@ -15,3 +15,17 @@ victorialogs_data_dir: /var/lib/victoria-logs
 # vector tails the systemd journal (all four Go services log JSON to stderr →
 # journald) and nginx's access logs, and ships both to VictoriaLogs.
 vector_version: "0.49.0"
+
+# Grafana datasource plugin for VictoriaLogs.
+#
+# Installed from the GitHub release rather than via `grafana-cli plugins
+# install`: grafana-cli needs --homepath to even start, and the catalog path
+# adds a dependency we don't need when the release asset is a fixed URL.
+#
+# The plugin is UNSIGNED — VictoriaMetrics stopped short of Grafana's
+# commercial signing tier — so Grafana refuses to load it unless the id is in
+# allow_loading_unsigned_plugins. We set that via a systemd env override
+# rather than editing grafana.ini, which the monitoring role owns.
+grafana_plugins_dir: /var/lib/grafana/plugins
+victorialogs_grafana_plugin: victoriametrics-logs-datasource
+victorialogs_plugin_version: "0.30.1"
