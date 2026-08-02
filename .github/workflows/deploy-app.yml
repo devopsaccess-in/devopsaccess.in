@@ -79,6 +79,10 @@ jobs:
           AUTH0_CLIENT_ID: placeholder
           AUTH0_CLIENT_SECRET: placeholder
           APP_BASE_URL: https://app.devopsaccess.in
+          # NEXT_PUBLIC_ vars are inlined at build time, so these must be set
+          # here — not in the runtime env file. Absent key => analytics no-op.
+          NEXT_PUBLIC_POSTHOG_KEY: ${{ secrets.POSTHOG_KEY }}
+          NEXT_PUBLIC_POSTHOG_HOST: ${{ secrets.POSTHOG_HOST }}
         run: pnpm build
 
       # Assemble the deployable tree: the standalone output plus .next/static

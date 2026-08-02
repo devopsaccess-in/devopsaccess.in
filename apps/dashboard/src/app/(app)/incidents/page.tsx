@@ -2,16 +2,29 @@
 
 import Link from "next/link";
 import { useQuery } from "@tanstack/react-query";
+import { useEffect, useRef } from "react";
 import { api } from "@/lib/api";
 import type { Incident } from "@/lib/types";
 import { fmtDuration, fmtTime } from "@/lib/format";
 import { StateBadge } from "@/components/state-badge";
+import { track } from "@/lib/analytics";
 
 export default function IncidentsPage() {
   const incidents = useQuery({
     queryKey: ["incidents", "all"],
     queryFn: () => api<{ incidents: Incident[] }>("/api/incidents"),
   });
+
+  // The activation moment is seeing a real incident, not opening an empty
+  // page — fire once per mount, and only when there is something to see.
+  const seen = useRef(false);
+  useEffect(() => {
+    const n = incidents.data?.incidents.length ?? 0;
+    if (n > 0 && !seen.current) {
+      seen.current = true;
+      track("incident_viewed", { count: n });
+    }
+  }, [incidents.data]);
 
   return (
     <div className="space-y-6">

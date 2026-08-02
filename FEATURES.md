@@ -33,6 +33,7 @@ covered by package tests · **manual** = part of the pre-launch manual gate in
 | Public status page — dashboard UI (`/status/{slug}`) | built | E2E `TestDashboardStatusPage` |
 | Embeddable SVG badge (`/api/badge/{slug}/{id}.svg`, uptime/status, gated on the status opt-in) + copy-paste embed snippets in the dashboard | built | E2E `TestIncidentPipeline` (renders + no cross-slug leak) · unit (color/format/escaping) |
 | First-run guidance: setup checklist, and a standing warning when monitors exist with no alert channel (incidents would open silently) | built | manual MT-16 |
+| Activation analytics: six funnel events (signup, monitor created, channel created, channel tested, incident viewed, status page enabled) behind opt-in consent; autocapture, pageview capture and session replay all disabled | built | manual MT-18 |
 | Dashboard (authed): monitors list + sparklines, monitor detail + latency chart, incidents, channels, settings | built | manual (needs real Auth0) — pre-launch gate |
 | Audit trail: every mutation (monitor/channel/settings) and system event (incident open/resolve) recorded per tenant, written in the same transaction as the change; Activity page in the dashboard; 90-day retention | built | E2E `TestAuditTrail` (attribution, survives delete, no webhook leak, cross-tenant) · integration RLS test |
 | Structured API access logs (route pattern, status, duration, tenant, actor, request id) | built | manual MT-14 |
