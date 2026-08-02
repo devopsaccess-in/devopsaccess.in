@@ -212,6 +212,8 @@ func (s *server) updateMonitor(w http.ResponseWriter, r *http.Request) {
 		ExpectedStatus   *int    `json:"expected_status"`
 		FailureThreshold *int    `json:"failure_threshold"`
 		Enabled          *bool   `json:"enabled"`
+		PeriodSeconds    *int    `json:"period_seconds"`
+		GraceSeconds     *int    `json:"grace_seconds"`
 	}
 	if err := decodeJSON(w, r, &in); err != nil {
 		s.writeError(w, http.StatusBadRequest, err.Error())
@@ -221,7 +223,7 @@ func (s *server) updateMonitor(w http.ResponseWriter, r *http.Request) {
 		Name: in.Name, URL: in.URL, Method: in.Method,
 		IntervalSeconds: in.IntervalSeconds, TimeoutMs: in.TimeoutMs,
 		ExpectedStatus: in.ExpectedStatus, FailureThreshold: in.FailureThreshold,
-		Enabled: in.Enabled,
+		Enabled: in.Enabled, PeriodSeconds: in.PeriodSeconds, GraceSeconds: in.GraceSeconds,
 	}
 
 	if p.Name != nil {
@@ -283,6 +285,12 @@ func describePatch(p store.MonitorPatch) string {
 	if p.FailureThreshold != nil {
 		parts = append(parts, fmt.Sprintf("failure_threshold -> %d", *p.FailureThreshold))
 	}
+	if p.PeriodSeconds != nil {
+		parts = append(parts, fmt.Sprintf("period_seconds -> %d", *p.PeriodSeconds))
+	}
+	if p.GraceSeconds != nil {
+		parts = append(parts, fmt.Sprintf("grace_seconds -> %d", *p.GraceSeconds))
+	}
 	if len(parts) == 0 {
 		return "no changes"
 	}
@@ -316,6 +324,12 @@ func patchDetails(p store.MonitorPatch) map[string]any {
 	if p.FailureThreshold != nil {
 		d["failure_threshold"] = *p.FailureThreshold
 	}
+	if p.PeriodSeconds != nil {
+		d["period_seconds"] = *p.PeriodSeconds
+	}
+	if p.GraceSeconds != nil {
+		d["grace_seconds"] = *p.GraceSeconds
+	}
 	return d
 }
 
@@ -343,6 +357,20 @@ func validatePatch(r *http.Request, p store.MonitorPatch, allowPrivate bool) err
 	}
 	if err := validateMonitorFields(name, method, interval, timeout, expected, threshold); err != nil {
 		return err
+	}
+	// Heartbeat cadence, when either half is being changed. Defaults stand in
+	// for the half that isn't, matching the DB's own constraints.
+	if p.PeriodSeconds != nil || p.GraceSeconds != nil {
+		period, grace := 3600, 300
+		if p.PeriodSeconds != nil {
+			period = *p.PeriodSeconds
+		}
+		if p.GraceSeconds != nil {
+			grace = *p.GraceSeconds
+		}
+		if err := validateHeartbeatFields(period, grace); err != nil {
+			return err
+		}
 	}
 	if p.URL != nil {
 		return validateMonitorURL(r.Context(), *p.URL, defaultLookup, allowPrivate)

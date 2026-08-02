@@ -4,12 +4,14 @@ import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/lib/api";
 import type { Channel } from "@/lib/types";
+import { ConfirmDialog } from "@/components/confirm-dialog";
 
 export default function ChannelsPage() {
   const qc = useQueryClient();
   const [type, setType] = useState<"email" | "slack_webhook">("email");
   const [value, setValue] = useState("");
   const [testResult, setTestResult] = useState<Record<string, string>>({});
+  const [pendingRemove, setPendingRemove] = useState<Channel | null>(null);
 
   const channels = useQuery({
     queryKey: ["channels"],
@@ -33,7 +35,10 @@ export default function ChannelsPage() {
 
   const remove = useMutation({
     mutationFn: (id: string) => api<void>(`/api/channels/${id}`, { method: "DELETE" }),
-    onSuccess: () => void qc.invalidateQueries({ queryKey: ["channels"] }),
+    onSuccess: () => {
+      setPendingRemove(null); // otherwise the dialog lingers over a deleted row
+      void qc.invalidateQueries({ queryKey: ["channels"] });
+    },
   });
 
   const test = useMutation({
@@ -114,7 +119,7 @@ export default function ChannelsPage() {
             <button
               className="btn-danger"
               disabled={remove.isPending}
-              onClick={() => remove.mutate(c.id)}
+              onClick={() => setPendingRemove(c)}
             >
               Remove
             </button>
@@ -126,6 +131,35 @@ export default function ChannelsPage() {
           </div>
         )}
       </div>
+
+      <ConfirmDialog
+        open={pendingRemove !== null}
+        title="Remove this alert channel?"
+        confirmLabel="Remove channel"
+        destructive
+        pending={remove.isPending}
+        error={remove.isError ? remove.error.message : null}
+        onCancel={() => setPendingRemove(null)}
+        onConfirm={() => pendingRemove && remove.mutate(pendingRemove.id)}
+        body={
+          <>
+            <p>
+              <span className="text-white">
+                {pendingRemove?.type === "email"
+                  ? pendingRemove.config.to
+                  : pendingRemove?.config.url}
+              </span>{" "}
+              will stop receiving alerts.
+            </p>
+            {channels.data?.channels.length === 1 && (
+              <p className="mt-2 text-signal">
+                This is your only channel — incidents will open silently, with no email or
+                Slack notification at all.
+              </p>
+            )}
+          </>
+        }
+      />
     </div>
   );
 }

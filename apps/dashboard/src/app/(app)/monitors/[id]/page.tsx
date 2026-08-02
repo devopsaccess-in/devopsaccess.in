@@ -12,6 +12,8 @@ import { LatencyChart } from "@/components/latency-chart";
 import { EmbedBadge } from "@/components/embed-badge";
 import { PhaseBreakdown, TLSChip } from "@/components/phase-breakdown";
 import { PingURL, fmtSeconds } from "@/components/ping-url";
+import { EditMonitor } from "@/components/edit-monitor";
+import { ConfirmDialog } from "@/components/confirm-dialog";
 
 function UptimeTile({ id, window: w }: { id: string; window: string }) {
   const uptime = useQuery({
@@ -34,6 +36,7 @@ export default function MonitorDetailPage({ params }: { params: Promise<{ id: st
   const router = useRouter();
   const qc = useQueryClient();
   const [windowSel, setWindowSel] = useState<"24h" | "7d">("24h");
+  const [confirmDelete, setConfirmDelete] = useState(false);
 
   const monitor = useQuery({
     queryKey: ["monitor", id],
@@ -163,6 +166,8 @@ export default function MonitorDetailPage({ params }: { params: Promise<{ id: st
         </ul>
       </div>
 
+      <EditMonitor key={m.updated_at} monitor={m} />
+
       <EmbedBadge monitorId={id} />
 
       <div className="card flex flex-wrap items-center gap-3">
@@ -176,20 +181,42 @@ export default function MonitorDetailPage({ params }: { params: Promise<{ id: st
         <button
           className="btn-danger"
           disabled={remove.isPending}
-          onClick={() => {
-            if (window.confirm(`Delete monitor "${m.name}" and all its history?`)) {
-              remove.mutate();
-            }
-          }}
+          onClick={() => setConfirmDelete(true)}
         >
           Delete monitor
         </button>
-        {(toggle.isError || remove.isError) && (
+        {(toggle.isError || (remove.isError && !confirmDelete)) && (
           <span className="text-sm text-alert">
             {toggle.error?.message ?? remove.error?.message}
           </span>
         )}
       </div>
+
+      <ConfirmDialog
+        open={confirmDelete}
+        title="Delete this monitor?"
+        confirmLabel="Delete monitor"
+        destructive
+        pending={remove.isPending}
+        error={remove.isError ? remove.error.message : null}
+        onCancel={() => setConfirmDelete(false)}
+        onConfirm={() => remove.mutate()}
+        body={
+          <>
+            <p>
+              <span className="text-white">{m.name}</span> and all of its check history,
+              incidents, and uptime figures will be permanently removed.
+            </p>
+            {m.kind === "heartbeat" && (
+              <p className="mt-2">
+                Its ping URL stops working immediately — anything still calling it will
+                start getting 404s.
+              </p>
+            )}
+            <p className="mt-2">This cannot be undone.</p>
+          </>
+        }
+      />
     </div>
   );
 }

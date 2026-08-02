@@ -93,19 +93,27 @@ covers Slack dispatch logic.)
 
 ## MT-6 — Recovery → resolved → recovery notice
 **Depends on:** state machine down→up, incident resolve, recovery notify.
-1. On "health-probe-down", edit the monitor and change **expected status** from
-   200 to **500** (so the 500 response now counts as success). Save. *(Do NOT
-   change the URL — a URL change closes the incident administratively; we want a
-   natural recovery.)*
-2. Wait ~1–2 min.
+1. With a monitor currently **down** (from MT-5), open it and use
+   **Settings → Edit**.
+2. Change **Expected status** to whatever the endpoint actually returns (e.g.
+   `500` for `httpstat.us/500`) so the next check counts as success. Save.
+   *(Do NOT change the URL — a URL change closes the incident
+   administratively; we want a natural recovery.)*
+3. Wait ~1–2 min.
+
+**Note:** if the endpoint fails at the connection level rather than returning
+a status (httpstat.us sometimes resets the connection), changing the expected
+status cannot fix it. In that case point a monitor at `https://example.com`
+with expected status `999`, let it go down, then edit it back to `200`.
 
 **Expected:**
 - State flips back to **up**.
 - The incident shows **resolved** with a duration.
-- A **RESOLVED email** arrives ("RESOLVED: health-probe-down is back up"); Slack
-  too if configured.
+- A **RESOLVED email** arrives; Slack too if configured.
 
-**Result:** ⬜
+**Result:** ⬜ — first attempt 2026-08-02 was blocked: the dashboard had no
+edit UI at all (only Pause/Delete), so the monitor could not be changed. Fixed
+by adding Settings → Edit; re-run after deploying that.
 
 ---
 

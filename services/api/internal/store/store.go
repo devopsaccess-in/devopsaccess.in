@@ -277,6 +277,9 @@ type MonitorPatch struct {
 	ExpectedStatus   *int
 	FailureThreshold *int
 	Enabled          *bool
+	// Heartbeat-only.
+	PeriodSeconds *int
+	GraceSeconds  *int
 }
 
 func UpdateMonitor(ctx context.Context, q Querier, tenantID, id string, p MonitorPatch) (Monitor, error) {
@@ -311,6 +314,12 @@ func UpdateMonitor(ctx context.Context, q Querier, tenantID, id string, p Monito
 	}
 	if p.Enabled != nil {
 		add("enabled", *p.Enabled)
+	}
+	if p.PeriodSeconds != nil {
+		add("period_seconds", *p.PeriodSeconds)
+	}
+	if p.GraceSeconds != nil {
+		add("grace_seconds", *p.GraceSeconds)
 	}
 	m, err := scanMonitor(q.QueryRow(ctx, `UPDATE monitors SET `+strings.Join(sets, ", ")+`
 		WHERE id = $1 AND tenant_id = $2 RETURNING `+monitorCols, args...))
