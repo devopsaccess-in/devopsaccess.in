@@ -1,6 +1,7 @@
 ---
 # Alert sender via the local Postfix relay.
-alert_from: "alerts@devopsaccess.in"
+# Must be a real Workspace mailbox — see the app_api role for why.
+alert_from: "support@devopsaccess.in"
 scheduler_workers: 20
 
 # Uptime DB connection — connects as uptime_scheduler (BYPASSRLS, see the

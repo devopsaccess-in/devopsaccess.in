@@ -164,15 +164,22 @@ func composeAlert(i pendingIncident, recovery bool) (subject, body string) {
 	ist := time.FixedZone("IST", 5*3600+1800)
 	started := i.StartedAt.In(ist).Format("02 Jan 2006 15:04:05 MST")
 
+	// Heartbeats have no URL — omit the line rather than printing "URL:" with
+	// nothing after it.
+	target := ""
+	if i.MonitorURL != "" {
+		target = fmt.Sprintf("URL: %s\n", i.MonitorURL)
+	}
+
 	if recovery && i.ResolvedAt != nil {
 		dur := i.ResolvedAt.Sub(i.StartedAt).Round(time.Second)
 		subject = fmt.Sprintf("RESOLVED: %s is back up", i.MonitorName)
-		body = fmt.Sprintf("Monitor: %s\nURL: %s\nDown since: %s\nDowntime: %s\n\n— DevOps Access uptime monitoring",
-			i.MonitorName, i.MonitorURL, started, dur)
+		body = fmt.Sprintf("Monitor: %s\n%sDown since: %s\nDowntime: %s\n\n— DevOps Access uptime monitoring",
+			i.MonitorName, target, started, dur)
 		return subject, body
 	}
 	subject = fmt.Sprintf("DOWN: %s is failing", i.MonitorName)
-	body = fmt.Sprintf("Monitor: %s\nURL: %s\nSince: %s\nCause: %s\n\n— DevOps Access uptime monitoring",
-		i.MonitorName, i.MonitorURL, started, i.Cause)
+	body = fmt.Sprintf("Monitor: %s\n%sSince: %s\nCause: %s\n\n— DevOps Access uptime monitoring",
+		i.MonitorName, target, started, i.Cause)
 	return subject, body
 }

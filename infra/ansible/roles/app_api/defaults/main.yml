@@ -8,7 +8,12 @@ api_listen_addr: "127.0.0.1:8081"
 auth0_audience: "https://api.devopsaccess.in"
 
 # Alert sender (channel-test endpoint) via the local Postfix relay.
-alert_from: "alerts@devopsaccess.in"
+# MUST be a real mailbox (or configured alias) in the Google Workspace account
+# that Postfix authenticates as — the contact service's long-standing
+# CONTACT_FROM. Sending as an address the account does not own (we used
+# alerts@devopsaccess.in, which is not a mailbox) still gets a 250 from Gmail,
+# but Workspace rewrites the sender, and that mismatch lands the mail in spam.
+alert_from: "support@devopsaccess.in"
 
 # Uptime DB connection — role names/db from the postgres role defaults;
 # uptime_db_password comes from the UPTIME_DB_PASSWORD CI secret.

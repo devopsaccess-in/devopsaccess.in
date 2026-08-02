@@ -33,7 +33,7 @@ func loadConfig() (config, error) {
 		auth0Audience: envOr("AUTH0_AUDIENCE", "https://api.devopsaccess.in"),
 		smtpHost:      envOr("SMTP_HOST", "127.0.0.1"),
 		smtpPort:      envOr("SMTP_PORT", "25"),
-		mailFrom:      envOr("ALERT_FROM", "alerts@devopsaccess.in"),
+		mailFrom:      envOr("ALERT_FROM", "support@devopsaccess.in"),
 
 		allowPrivateTargets: os.Getenv("UPTIME_ALLOW_PRIVATE_TARGETS") == "true",
 	}
