@@ -159,7 +159,17 @@ func (s *server) createMonitor(w http.ResponseWriter, r *http.Request) {
 			PeriodSeconds:    in.PeriodSeconds,
 			GraceSeconds:     in.GraceSeconds,
 		})
-		return err
+		if err != nil {
+			return err
+		}
+		target := m.URL
+		if m.Kind == "heartbeat" {
+			target = fmt.Sprintf("every %ds", m.PeriodSeconds)
+		}
+		return store.Audit(r.Context(), tx, tenantID(r.Context()), actor(r.Context()),
+			store.ActionMonitorCreate,
+			fmt.Sprintf("created %s monitor %q (%s)", m.Kind, m.Name, target),
+			&m.ID, map[string]any{"kind": m.Kind, "url": m.URL})
 	})
 	if err != nil {
 		s.serverError(w, r, err)
@@ -226,13 +236,87 @@ func (s *server) updateMonitor(w http.ResponseWriter, r *http.Request) {
 	err := db.WithTenant(r.Context(), s.pool, tenantID(r.Context()), func(tx pgx.Tx) error {
 		var err error
 		m, err = store.UpdateMonitor(r.Context(), tx, tenantID(r.Context()), id, p)
-		return err
+		if err != nil {
+			return err
+		}
+		return store.Audit(r.Context(), tx, tenantID(r.Context()), actor(r.Context()),
+			store.ActionMonitorUpdate,
+			fmt.Sprintf("updated monitor %q: %s", m.Name, describePatch(p)),
+			&m.ID, patchDetails(p))
 	})
 	if err != nil {
 		s.storeError(w, r, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, m)
+}
+
+// describePatch renders the changed fields for the audit summary, e.g.
+// "paused; interval_seconds -> 120".
+func describePatch(p store.MonitorPatch) string {
+	var parts []string
+	if p.Enabled != nil {
+		if *p.Enabled {
+			parts = append(parts, "resumed")
+		} else {
+			parts = append(parts, "paused")
+		}
+	}
+	if p.Name != nil {
+		parts = append(parts, fmt.Sprintf("name -> %q", *p.Name))
+	}
+	if p.URL != nil {
+		parts = append(parts, fmt.Sprintf("url -> %s", *p.URL))
+	}
+	if p.Method != nil {
+		parts = append(parts, fmt.Sprintf("method -> %s", *p.Method))
+	}
+	if p.IntervalSeconds != nil {
+		parts = append(parts, fmt.Sprintf("interval_seconds -> %d", *p.IntervalSeconds))
+	}
+	if p.TimeoutMs != nil {
+		parts = append(parts, fmt.Sprintf("timeout_ms -> %d", *p.TimeoutMs))
+	}
+	if p.ExpectedStatus != nil {
+		parts = append(parts, fmt.Sprintf("expected_status -> %d", *p.ExpectedStatus))
+	}
+	if p.FailureThreshold != nil {
+		parts = append(parts, fmt.Sprintf("failure_threshold -> %d", *p.FailureThreshold))
+	}
+	if len(parts) == 0 {
+		return "no changes"
+	}
+	return strings.Join(parts, "; ")
+}
+
+// patchDetails is the machine-readable form of the same change set.
+func patchDetails(p store.MonitorPatch) map[string]any {
+	d := map[string]any{}
+	if p.Enabled != nil {
+		d["enabled"] = *p.Enabled
+	}
+	if p.Name != nil {
+		d["name"] = *p.Name
+	}
+	if p.URL != nil {
+		d["url"] = *p.URL
+	}
+	if p.Method != nil {
+		d["method"] = *p.Method
+	}
+	if p.IntervalSeconds != nil {
+		d["interval_seconds"] = *p.IntervalSeconds
+	}
+	if p.TimeoutMs != nil {
+		d["timeout_ms"] = *p.TimeoutMs
+	}
+	if p.ExpectedStatus != nil {
+		d["expected_status"] = *p.ExpectedStatus
+	}
+	if p.FailureThreshold != nil {
+		d["failure_threshold"] = *p.FailureThreshold
+	}
+	return d
 }
 
 // validatePatch checks only the fields present, reusing the create-time rules.
@@ -273,7 +357,19 @@ func (s *server) deleteMonitor(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	err := db.WithTenant(r.Context(), s.pool, tenantID(r.Context()), func(tx pgx.Tx) error {
-		return store.DeleteMonitor(r.Context(), tx, tenantID(r.Context()), id)
+		// Read the name first: after the delete there is nothing left to
+		// name in the audit trail, which is exactly when someone asks.
+		m, err := store.GetMonitor(r.Context(), tx, tenantID(r.Context()), id)
+		if err != nil {
+			return err
+		}
+		if err := store.DeleteMonitor(r.Context(), tx, tenantID(r.Context()), id); err != nil {
+			return err
+		}
+		return store.Audit(r.Context(), tx, tenantID(r.Context()), actor(r.Context()),
+			store.ActionMonitorDelete,
+			fmt.Sprintf("deleted %s monitor %q", m.Kind, m.Name),
+			nil, map[string]any{"kind": m.Kind, "url": m.URL, "monitor_id": m.ID})
 	})
 	if err != nil {
 		s.storeError(w, r, err)

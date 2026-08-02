@@ -37,6 +37,18 @@ func tenantID(ctx context.Context) string {
 	return id
 }
 
+// actor identifies the authenticated caller for the audit trail. Email comes
+// from the same optional token claims /api/me uses; it is stored alongside the
+// subject so the log stays readable without joining users.
+func actor(ctx context.Context) store.Actor {
+	sub, _ := auth.Sub(ctx)
+	var email string
+	if claims, ok := auth.Claims(ctx); ok {
+		email = auth.StringClaim(claims, "https://devopsaccess.in/email", "email")
+	}
+	return store.Actor{Sub: sub, Email: email}
+}
+
 // requireTenant resolves the caller's tenant from the verified token subject.
 // Users who have never hit /api/me have no tenant yet — the dashboard always
 // calls /api/me first, so that is a client bug surfaced as 403.

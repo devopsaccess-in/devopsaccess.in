@@ -132,6 +132,48 @@ func TestTenantIsolationRLS(t *testing.T) {
 		t.Fatal("RLS leak: tenant2 inserted a monitor into tenant1")
 	}
 
+	// The audit trail is tenant data too: tenant 2 must not read tenant 1's
+	// entries, and must not be able to forge one against tenant 1.
+	if err := db.WithTenant(ctx, pool, t1.ID, func(tx pgx.Tx) error {
+		return store.Audit(ctx, tx, t1.ID, store.Actor{Sub: "auth0|t1"},
+			store.ActionMonitorCreate, "rls audit probe", &m.ID, nil)
+	}); err != nil {
+		t.Fatalf("tenant1 audit write: %v", err)
+	}
+	err = db.WithTenant(ctx, pool, t2.ID, func(tx pgx.Tx) error {
+		entries, err := store.ListAudit(ctx, tx, t2.ID, 100)
+		if err != nil {
+			return err
+		}
+		for _, e := range entries {
+			if e.Summary == "rls audit probe" {
+				return fmt.Errorf("RLS leak: tenant2 read tenant1's audit entry")
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Forging an entry into another tenant must fail the WITH CHECK. Its own
+	// transaction: the rejected statement aborts the surrounding one.
+	err = db.WithTenant(ctx, pool, t2.ID, func(tx pgx.Tx) error {
+		return store.Audit(ctx, tx, t1.ID, store.Actor{Sub: "auth0|t2"},
+			store.ActionMonitorCreate, "forged", nil, nil)
+	})
+	if err == nil {
+		t.Fatal("RLS leak: tenant2 wrote an audit entry for tenant1")
+	}
+	var forged int
+	if err := pool.QueryRow(ctx,
+		`SELECT count(*) FROM audit_log WHERE summary = 'forged'`).Scan(&forged); err != nil {
+		t.Fatalf("count forged: %v", err)
+	}
+	if forged != 0 {
+		t.Fatalf("RLS leak: %d forged audit rows persisted", forged)
+	}
+
 	// A transaction with NO tenant context sees nothing.
 	tx, err := pool.Begin(ctx)
 	if err != nil {

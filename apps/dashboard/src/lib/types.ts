@@ -74,6 +74,16 @@ export type Uptime = {
   uptime_pct: number | null;
 };
 
+export type AuditEntry = {
+  id: number;
+  actor_email: string;
+  action: string;
+  entity_id: string | null;
+  summary: string;
+  details: Record<string, unknown>;
+  created_at: string;
+};
+
 export type StatusPage = {
   name: string;
   slug: string;

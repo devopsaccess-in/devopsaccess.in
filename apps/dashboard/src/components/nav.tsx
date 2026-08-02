@@ -9,6 +9,7 @@ const links = [
   { href: "/monitors", label: "Monitors" },
   { href: "/incidents", label: "Incidents" },
   { href: "/channels", label: "Channels" },
+  { href: "/activity", label: "Activity" },
   { href: "/settings", label: "Settings" },
 ];
 

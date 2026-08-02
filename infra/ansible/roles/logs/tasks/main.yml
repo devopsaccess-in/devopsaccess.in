@@ -1,0 +1,155 @@
+---
+# ===========================================================================
+# logs — VictoriaLogs (store) + vector (collector), both localhost-only, with
+# Grafana wired up as the query UI.
+#
+# Where logs come from:
+#   - the four Go services log structured JSON to stderr -> systemd journal
+#   - nginx writes its own access/error logs per vhost
+# vector tails both and ships them to VictoriaLogs, which Grafana queries via
+# the VictoriaLogs datasource. Nothing new is exposed to the network.
+# ===========================================================================
+
+- name: Create victorialogs system group
+  ansible.builtin.group:
+    name: victorialogs
+    system: true
+
+- name: Create victorialogs system user
+  ansible.builtin.user:
+    name: victorialogs
+    group: victorialogs
+    system: true
+    shell: /usr/sbin/nologin
+    create_home: false
+
+- name: Create VictoriaLogs data directory
+  ansible.builtin.file:
+    path: "{{ victorialogs_data_dir }}"
+    state: directory
+    owner: victorialogs
+    group: victorialogs
+    mode: "0750"
+
+- name: Download VictoriaLogs
+  ansible.builtin.get_url:
+    url: "https://github.com/VictoriaMetrics/VictoriaLogs/releases/download/v{{ victorialogs_version }}/victoria-logs-linux-amd64-v{{ victorialogs_version }}.tar.gz"
+    dest: "/tmp/victoria-logs-{{ victorialogs_version }}.tar.gz"
+    mode: "0644"
+
+- name: Unpack VictoriaLogs
+  ansible.builtin.unarchive:
+    src: "/tmp/victoria-logs-{{ victorialogs_version }}.tar.gz"
+    dest: /usr/local/bin
+    remote_src: true
+    owner: root
+    group: root
+    mode: "0755"
+  notify: Restart victorialogs
+
+- name: Install VictoriaLogs systemd unit
+  ansible.builtin.template:
+    src: victorialogs.service.j2
+    dest: /etc/systemd/system/victorialogs.service
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Restart victorialogs
+
+- name: Enable and start VictoriaLogs
+  ansible.builtin.systemd_service:
+    name: victorialogs
+    enabled: true
+    state: started
+    daemon_reload: true
+
+# --- vector: journald + nginx -> VictoriaLogs -------------------------------
+- name: Add Vector apt key
+  ansible.builtin.get_url:
+    url: https://keys.datadoghq.com/DATADOG_APT_KEY_CURRENT.public
+    dest: /etc/apt/keyrings/vector.asc
+    mode: "0644"
+
+- name: Add Vector repository
+  ansible.builtin.apt_repository:
+    repo: "deb [signed-by=/etc/apt/keyrings/vector.asc] https://apt.vector.dev/ stable vector-0"
+    filename: vector
+    state: present
+
+- name: Install Vector
+  ansible.builtin.apt:
+    name: vector
+    state: present
+    update_cache: true
+
+# vector runs as its own user; it needs journal read access and nginx logs.
+- name: Allow vector to read the systemd journal
+  ansible.builtin.user:
+    name: vector
+    groups: systemd-journal,adm
+    append: true
+  notify: Restart vector
+
+- name: Configure Vector
+  ansible.builtin.template:
+    src: vector.yaml.j2
+    dest: /etc/vector/vector.yaml
+    owner: root
+    group: vector
+    mode: "0640"
+  notify: Restart vector
+
+- name: Enable and start Vector
+  ansible.builtin.systemd_service:
+    name: vector
+    enabled: true
+    state: started
+    daemon_reload: true
+
+# --- journald retention -----------------------------------------------------
+# vector ships logs onward, so the journal itself only needs a small buffer.
+- name: Ensure journald drop-in directory exists
+  ansible.builtin.file:
+    path: /etc/systemd/journald.conf.d
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Cap journald disk usage
+  ansible.builtin.copy:
+    dest: /etc/systemd/journald.conf.d/00-retention.conf
+    owner: root
+    group: root
+    mode: "0644"
+    content: |
+      # Managed by Ansible (logs role).
+      [Journal]
+      SystemMaxUse=500M
+      MaxRetentionSec=7day
+  notify: Restart journald
+
+# --- Grafana datasource -----------------------------------------------------
+# Grafana comes from the monitoring role. Detect it rather than assuming, so
+# this role also works on a box that runs logs without the metrics stack.
+- name: Check whether Grafana is installed
+  ansible.builtin.stat:
+    path: /etc/grafana/provisioning/datasources
+  register: grafana_provisioning
+
+- name: Install the VictoriaLogs Grafana datasource plugin
+  ansible.builtin.command:
+    cmd: grafana-cli plugins install victoriametrics-logs-datasource
+    creates: /var/lib/grafana/plugins/victoriametrics-logs-datasource
+  notify: Restart grafana
+  when: grafana_provisioning.stat.exists
+
+- name: Provision the VictoriaLogs datasource in Grafana
+  ansible.builtin.template:
+    src: grafana-victorialogs.yaml.j2
+    dest: /etc/grafana/provisioning/datasources/victorialogs.yaml
+    owner: root
+    group: grafana
+    mode: "0640"
+  notify: Restart grafana
+  when: grafana_provisioning.stat.exists

@@ -21,4 +21,16 @@ func (p *prober) purgeOldResults(ctx context.Context) {
 	if n := tag.RowsAffected(); n > 0 {
 		p.log.Info().Int64("rows", n).Msg("purged old monitor results")
 	}
+
+	// Audit entries are kept longer than raw check results: they are the
+	// record customers and support actually go back through.
+	auditTag, err := p.pool.Exec(ctx,
+		`DELETE FROM audit_log WHERE created_at < now() - interval '90 days'`)
+	if err != nil {
+		p.log.Error().Err(err).Msg("purge old audit entries failed")
+		return
+	}
+	if n := auditTag.RowsAffected(); n > 0 {
+		p.log.Info().Int64("rows", n).Msg("purged old audit entries")
+	}
 }

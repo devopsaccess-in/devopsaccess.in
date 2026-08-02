@@ -340,6 +340,96 @@ func TestIncidentPipeline(t *testing.T) {
 	c.mustDo(t, "DELETE", "/api/channels/"+slackCh.ID, nil, nil, http.StatusNoContent)
 }
 
+// FEATURES.md: audit trail — who changed what, when. Also the answer to
+// "why did my monitor disappear".
+func TestAuditTrail(t *testing.T) {
+	sub := uniqueSub("audit")
+	c := newClient(t, sub, "auditor@a.in", "")
+	var me meResp
+	c.mustDo(t, "GET", "/api/me", nil, &me, http.StatusOK)
+
+	type auditResp struct {
+		Entries []struct {
+			Action     string `json:"action"`
+			Summary    string `json:"summary"`
+			ActorEmail string `json:"actor_email"`
+		} `json:"entries"`
+	}
+	actions := func() map[string]string {
+		var a auditResp
+		c.mustDo(t, "GET", "/api/audit", nil, &a, http.StatusOK)
+		byAction := map[string]string{}
+		for _, e := range a.Entries {
+			byAction[e.Action] = e.Summary
+		}
+		return byAction
+	}
+
+	// Provisioning opens the trail.
+	if got := actions(); got["user.first_login"] == "" {
+		t.Fatalf("first login not audited: %+v", got)
+	}
+
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer target.Close()
+
+	var m monitorResp
+	c.mustDo(t, "POST", "/api/monitors", monitorPayload("audited monitor", target.URL, 2), &m, http.StatusCreated)
+	c.mustDo(t, "PATCH", "/api/monitors/"+m.ID, map[string]any{"enabled": false}, &m, http.StatusOK)
+	c.mustDo(t, "DELETE", "/api/monitors/"+m.ID, nil, nil, http.StatusNoContent)
+
+	got := actions()
+	for _, want := range []string{"monitor.create", "monitor.update", "monitor.delete"} {
+		if got[want] == "" {
+			t.Errorf("missing audit action %q; have %v", want, got)
+		}
+	}
+	// The name must survive the delete — that is the whole point.
+	if !strings.Contains(got["monitor.delete"], "audited monitor") {
+		t.Errorf("delete entry should name the monitor: %q", got["monitor.delete"])
+	}
+	if !strings.Contains(got["monitor.update"], "paused") {
+		t.Errorf("update entry should describe the change: %q", got["monitor.update"])
+	}
+	// Actions are attributed to the caller.
+	var a auditResp
+	c.mustDo(t, "GET", "/api/audit", nil, &a, http.StatusOK)
+	for _, e := range a.Entries {
+		if e.Action == "monitor.create" && e.ActorEmail != "auditor@a.in" {
+			t.Errorf("create not attributed: %q", e.ActorEmail)
+		}
+	}
+
+	// A Slack webhook URL is a credential: only its host may reach the log.
+	var slackCh struct {
+		ID string `json:"id"`
+	}
+	c.mustDo(t, "POST", "/api/channels",
+		map[string]any{"type": "slack_webhook", "config": map[string]string{"url": slackSink.url()}},
+		&slackCh, http.StatusCreated)
+	c.mustDo(t, "GET", "/api/audit", nil, &a, http.StatusOK)
+	for _, e := range a.Entries {
+		if strings.Contains(e.Summary, "/hook") {
+			t.Fatalf("audit summary leaked the webhook path: %q", e.Summary)
+		}
+	}
+
+	// Another tenant sees none of it.
+	other := newClient(t, uniqueSub("audit-other"), "other@b.in", "")
+	other.mustDo(t, "GET", "/api/me", nil, nil, http.StatusOK)
+	var otherAudit auditResp
+	other.mustDo(t, "GET", "/api/audit", nil, &otherAudit, http.StatusOK)
+	for _, e := range otherAudit.Entries {
+		if strings.Contains(e.Summary, "audited monitor") {
+			t.Fatalf("audit trail leaked across tenants: %q", e.Summary)
+		}
+	}
+
+	c.mustDo(t, "DELETE", "/api/channels/"+slackCh.ID, nil, nil, http.StatusNoContent)
+}
+
 // FEATURES.md: heartbeat ("dead man's switch") monitors — the job pings us,
 // and silence is the failure.
 func TestHeartbeatMonitor(t *testing.T) {

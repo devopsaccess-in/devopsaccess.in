@@ -222,6 +222,31 @@ restart.
 
 ---
 
+## MT-14 — Logging & audit (post-deploy)
+**Depends on:** VictoriaLogs + vector on the VM, Grafana, real request traffic.
+1. Deploy with the `logs` tag (Configure Server → `tags=logs`).
+2. SSH in and confirm both services are up:
+   `systemctl status victorialogs vector --no-pager | head -20`
+3. Generate traffic: load the dashboard, create and delete a monitor.
+4. In Grafana (grafana.devopsaccess.in) → Explore → **VictoriaLogs**
+   datasource. Query `{service="uptime-api.service"}`.
+5. In the dashboard, open **Activity**.
+6. Check disk: `du -sh /var/lib/victoria-logs && journalctl --disk-usage`
+
+**Expected:**
+- (2) both active; VictoriaLogs listening on 127.0.0.1:9428 only
+  (`ss -ltnp | grep 9428` shows no 0.0.0.0 bind).
+- (4) structured lines with `level`, `svc`, `route`, `status`, `duration`,
+  `tenant_id` — and nginx lines under `{service="nginx"}`.
+- (5) the monitor create and delete appear, attributed to your email, newest
+  first; the delete entry still names the monitor.
+- (6) journal capped around 500M; VictoriaLogs data well under the 3GiB cap.
+- No ping tokens or monitor ids in the `route` field (route patterns only).
+
+**Result:** ⬜
+
+---
+
 ## MT-9 — Cleanup
 1. Delete the test monitors (health-probe-up, health-probe-down) and the test
    channels.

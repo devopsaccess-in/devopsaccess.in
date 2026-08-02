@@ -31,6 +31,9 @@ covered by package tests · **manual** = part of the pre-launch manual gate in
 | Public status page — dashboard UI (`/status/{slug}`) | built | E2E `TestDashboardStatusPage` |
 | Embeddable SVG badge (`/api/badge/{slug}/{id}.svg`, uptime/status, gated on the status opt-in) + copy-paste embed snippets in the dashboard | built | E2E `TestIncidentPipeline` (renders + no cross-slug leak) · unit (color/format/escaping) |
 | Dashboard (authed): monitors list + sparklines, monitor detail + latency chart, incidents, channels, settings | built | manual (needs real Auth0) — pre-launch gate |
+| Audit trail: every mutation (monitor/channel/settings) and system event (incident open/resolve) recorded per tenant, written in the same transaction as the change; Activity page in the dashboard; 90-day retention | built | E2E `TestAuditTrail` (attribution, survives delete, no webhook leak, cross-tenant) · integration RLS test |
+| Structured API access logs (route pattern, status, duration, tenant, actor, request id) | built | manual MT-14 |
+| Log aggregation: VictoriaLogs + vector shipping journald + nginx logs, queryable in Grafana; journald + log-store retention caps | built (infra) | manual MT-14 |
 | 30-day results retention (nightly purge) | built | code-reviewed; no automated test (startup purge logged) |
 | Billing: manual Razorpay payment link | decided, not built | — |
 

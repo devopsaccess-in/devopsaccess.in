@@ -65,6 +65,10 @@ func main() {
 
 	r := chi.NewRouter()
 	r.Use(middleware.RealIP)
+	r.Use(middleware.RequestID)
+	// After RequestID (so the id is in the log line) and outside Recoverer so
+	// panics are still logged as 500s.
+	r.Use(s.accessLog)
 	r.Use(middleware.Recoverer)
 	r.Use(middleware.Timeout(30 * time.Second))
 
@@ -95,6 +99,7 @@ func main() {
 				mr.Get("/{id}/uptime", s.monitorUptime)
 			})
 			tr.Patch("/api/settings", s.updateSettings)
+			tr.Get("/api/audit", s.listAudit)
 			tr.Get("/api/incidents", s.listIncidents)
 			tr.Get("/api/incidents/{id}", s.getIncident)
 			tr.Route("/api/channels", func(cr chi.Router) {

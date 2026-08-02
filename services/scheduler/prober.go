@@ -132,11 +132,19 @@ func (p *prober) apply(ctx context.Context, j job, r checkResult) error {
 			j.TenantID, j.ID, cause); err != nil {
 			return fmt.Errorf("open incident: %w", err)
 		}
+		if err := p.audit(ctx, tx, j, auditIncidentOpen,
+			fmt.Sprintf("incident opened for %q: %s", j.Name, r.Error)); err != nil {
+			return err
+		}
 	}
 	if tr.ResolveIncident {
 		if _, err := tx.Exec(ctx, `UPDATE incidents SET resolved_at = now()
 			WHERE monitor_id = $1 AND resolved_at IS NULL`, j.ID); err != nil {
 			return fmt.Errorf("resolve incident: %w", err)
+		}
+		if err := p.audit(ctx, tx, j, auditIncidentResolve,
+			fmt.Sprintf("incident resolved for %q", j.Name)); err != nil {
+			return err
 		}
 	}
 	if err := tx.Commit(ctx); err != nil {

@@ -1,0 +1,69 @@
+# Managed by Ansible (logs role).
+#
+# Two sources -> VictoriaLogs:
+#   journald  — the Go services (uptime-api, uptime-scheduler, contact) emit
+#               structured JSON to stderr, which systemd captures
+#   nginx     — per-vhost access logs, for traffic the app never sees (4xx at
+#               the edge, static assets, blocked requests)
+
+data_dir: /var/lib/vector
+
+sources:
+  journal:
+    type: journald
+    include_units:
+      - uptime-api.service
+      - uptime-scheduler.service
+      - dashboard.service
+      - contact.service
+      - victorialogs.service
+
+  nginx_access:
+    type: file
+    include:
+      - /var/log/nginx/access.log
+      - /var/log/nginx/app.access.log
+    read_from: end
+
+transforms:
+  # The services log JSON; lift it to top-level fields so Grafana can filter
+  # on level/svc directly. Non-JSON lines (panics, runtime output) pass
+  # through with the raw message intact rather than being dropped.
+  journal_parsed:
+    type: remap
+    inputs: [journal]
+    source: |
+      .service = del(._SYSTEMD_UNIT) || "unknown"
+      parsed, err = parse_json(.message)
+      if err == null && is_object(parsed) {
+        .   = merge(., object!(parsed))
+        .log_source = "service"
+      } else {
+        .log_source = "service_raw"
+      }
+
+  nginx_tagged:
+    type: remap
+    inputs: [nginx_access]
+    source: |
+      .log_source = "nginx"
+      .service = "nginx"
+
+sinks:
+  victorialogs:
+    type: elasticsearch
+    inputs: [journal_parsed, nginx_tagged]
+    endpoints:
+      - "http://{{ victorialogs_listen }}/insert/elasticsearch"
+    mode: bulk
+    api_version: v8
+    healthcheck:
+      enabled: false
+    query:
+      _msg_field: "message"
+      _time_field: "timestamp"
+      _stream_fields: "service,log_source"
+    request:
+      headers:
+        AccountID: "0"
+        ProjectID: "0"
