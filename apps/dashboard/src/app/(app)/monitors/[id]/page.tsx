@@ -5,7 +5,8 @@ import { use, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/lib/api";
-import type { CheckResult, Incident, Monitor, Uptime } from "@/lib/types";
+import type { CheckResult, Incident, Monitor, SeriesPoint, Uptime } from "@/lib/types";
+import { RANGES, type RangeKey } from "@/lib/types";
 import { fmtDuration, fmtPct, fmtTime } from "@/lib/format";
 import { StateBadge } from "@/components/state-badge";
 import { LatencyChart } from "@/components/latency-chart";
@@ -15,6 +16,11 @@ import { PingURL, fmtSeconds } from "@/components/ping-url";
 import { EditMonitor } from "@/components/edit-monitor";
 import { ConfirmDialog } from "@/components/confirm-dialog";
 import { SetupGuide } from "@/components/setup-guide";
+
+// Ranges longer than a day barely move between polls.
+function longRange(r: RangeKey): boolean {
+  return r.endsWith("d") && Number(r.slice(0, -1)) >= 2;
+}
 
 function UptimeTile({ id, window: w }: { id: string; window: string }) {
   const uptime = useQuery({
@@ -36,17 +42,27 @@ export default function MonitorDetailPage({ params }: { params: Promise<{ id: st
   const { id } = use(params);
   const router = useRouter();
   const qc = useQueryClient();
-  const [windowSel, setWindowSel] = useState<"24h" | "7d">("24h");
+  const [range, setRange] = useState<RangeKey>("24h");
   const [confirmDelete, setConfirmDelete] = useState(false);
 
   const monitor = useQuery({
     queryKey: ["monitor", id],
     queryFn: () => api<Monitor>(`/api/monitors/${id}`),
   });
-  const results = useQuery({
-    queryKey: ["results", id, windowSel],
-    queryFn: () =>
-      api<{ results: CheckResult[] }>(`/api/monitors/${id}/results?window=${windowSel}`),
+  // Only the newest checks are needed, for the phase breakdown. A handful
+  // rather than one: the very latest check may have failed before recording
+  // any timings (a DNS failure has no TTFB), and the breakdown should still
+  // show the last check that did.
+  const latest = useQuery({
+    queryKey: ["results", id, "latest"],
+    queryFn: () => api<{ results: CheckResult[] }>(`/api/monitors/${id}/results?window=24h&limit=10`),
+  });
+  // The chart reads fixed-size buckets, so a 30d range costs the same as 1h.
+  // Long ranges change slowly, so poll them far less often.
+  const series = useQuery({
+    queryKey: ["series", id, range],
+    queryFn: () => api<{ buckets: SeriesPoint[] }>(`/api/monitors/${id}/series?window=${range}&buckets=120`),
+    refetchInterval: longRange(range) ? 5 * 60_000 : 60_000,
   });
   const incidents = useQuery({
     queryKey: ["incidents", id],
@@ -118,23 +134,24 @@ export default function MonitorDetailPage({ params }: { params: Promise<{ id: st
       <div className="card">
         <div className="mb-4 flex items-center justify-between">
           <h2 className="text-base font-medium text-white">Response time</h2>
-          <div className="flex gap-1">
-            {(["24h", "7d"] as const).map((w) => (
+          <div className="flex flex-wrap gap-1">
+            {RANGES.map((r) => (
               <button
-                key={w}
-                onClick={() => setWindowSel(w)}
+                key={r.key}
+                onClick={() => setRange(r.key)}
+                aria-pressed={r.key === range}
                 className={
-                  w === windowSel
-                    ? "rounded-md bg-ink-soft px-3 py-1 font-mono text-xs text-white"
-                    : "rounded-md px-3 py-1 font-mono text-xs text-mist-faint hover:text-mist"
+                  r.key === range
+                    ? "rounded-md bg-ink-soft px-2.5 py-1 font-mono text-xs text-white"
+                    : "rounded-md px-2.5 py-1 font-mono text-xs text-mist-faint hover:text-mist"
                 }
               >
-                {w}
+                {r.label}
               </button>
             ))}
           </div>
         </div>
-        <LatencyChart results={results.data?.results ?? []} />
+        <LatencyChart buckets={series.data?.buckets ?? []} />
       </div>
       )}
 
@@ -144,7 +161,7 @@ export default function MonitorDetailPage({ params }: { params: Promise<{ id: st
           <h2 className="text-base font-medium text-white">Where the time goes</h2>
           <span className="text-xs text-mist-faint">latest check</span>
         </div>
-        <PhaseBreakdown results={results.data?.results ?? []} />
+        <PhaseBreakdown results={latest.data?.results ?? []} />
       </div>
       )}
 

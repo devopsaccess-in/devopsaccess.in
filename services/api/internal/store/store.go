@@ -383,6 +383,58 @@ func ListResults(ctx context.Context, q Querier, tenantID, monitorID string, sin
 	return results, rows.Err()
 }
 
+// SeriesPoint is one time bucket of check results. Latency fields are nil
+// when no check in the bucket recorded one.
+type SeriesPoint struct {
+	T        time.Time `json:"t"`
+	OK       int       `json:"ok"`
+	Fail     int       `json:"fail"`
+	AvgMs    *int      `json:"avg_ms"`
+	MaxMs    *int      `json:"max_ms"`
+	// Phase is the failure phase of a failed check in the bucket, for colour
+	// and tooltips; empty when the bucket is clean.
+	Phase string `json:"phase"`
+}
+
+// Series aggregates a monitor's results into at most `buckets` evenly spaced
+// time buckets, in Postgres rather than by shipping every row to the client.
+// A 30-day window at a 60s interval is ~43k rows; as 120 buckets it is 120.
+// This is what keeps the dashboard responsive as history accumulates.
+func Series(ctx context.Context, q Querier, tenantID, monitorID string, since time.Time, buckets int) ([]SeriesPoint, error) {
+	if buckets < 1 {
+		buckets = 1
+	}
+	width := max(time.Since(since)/time.Duration(buckets), time.Second)
+	secs := int(width.Seconds())
+
+	// floor(epoch / width) * width snaps each row to its bucket start; the
+	// (monitor_id, checked_at DESC) index still drives the scan.
+	rows, err := q.Query(ctx, `SELECT
+			to_timestamp(floor(extract(epoch FROM checked_at) / $4) * $4) AS bucket,
+			count(*) FILTER (WHERE ok)     AS ok,
+			count(*) FILTER (WHERE NOT ok) AS fail,
+			avg(latency_ms) FILTER (WHERE ok)::int AS avg_ms,
+			max(latency_ms) FILTER (WHERE ok)::int AS max_ms,
+			COALESCE(max(failure_phase) FILTER (WHERE NOT ok), '') AS phase
+		FROM monitor_results
+		WHERE monitor_id = $1 AND tenant_id = $2 AND checked_at >= $3
+		GROUP BY 1 ORDER BY 1`, monitorID, tenantID, since, secs)
+	if err != nil {
+		return nil, fmt.Errorf("series: %w", err)
+	}
+	defer rows.Close()
+
+	points := []SeriesPoint{}
+	for rows.Next() {
+		var p SeriesPoint
+		if err := rows.Scan(&p.T, &p.OK, &p.Fail, &p.AvgMs, &p.MaxMs, &p.Phase); err != nil {
+			return nil, fmt.Errorf("scan series point: %w", err)
+		}
+		points = append(points, p)
+	}
+	return points, rows.Err()
+}
+
 // Uptime returns ok and total check counts since the given time.
 func Uptime(ctx context.Context, q Querier, tenantID, monitorID string, since time.Time) (ok, total int64, err error) {
 	err = q.QueryRow(ctx, `SELECT count(*) FILTER (WHERE ok), count(*)

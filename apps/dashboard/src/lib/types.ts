@@ -39,6 +39,31 @@ export type CheckResult = {
   failure_phase: string;
 };
 
+// One aggregated time bucket from /api/monitors/{id}/series. Charts read
+// these instead of raw results, so payload size is fixed regardless of range.
+export type SeriesPoint = {
+  t: string;
+  ok: number;
+  fail: number;
+  avg_ms: number | null;
+  max_ms: number | null;
+  phase: string;
+};
+
+// The ranges offered on the monitor page, coarsening as they get longer.
+export const RANGES = [
+  { key: "1h", label: "1h" },
+  { key: "6h", label: "6h" },
+  { key: "12h", label: "12h" },
+  { key: "24h", label: "24h" },
+  { key: "2d", label: "2d" },
+  { key: "7d", label: "7d" },
+  { key: "14d", label: "14d" },
+  { key: "30d", label: "30d" },
+] as const;
+
+export type RangeKey = (typeof RANGES)[number]["key"];
+
 export type Incident = {
   id: string;
   monitor_id: string;

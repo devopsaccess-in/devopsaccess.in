@@ -1,23 +1,24 @@
 "use client";
 
-import type { CheckResult } from "@/lib/types";
+import type { SeriesPoint } from "@/lib/types";
 import { fmtTime } from "@/lib/format";
 
-// Sparkline of recent checks, oldest → newest: one thin bar per check, teal
-// ok / red fail (status colors; the row's StateBadge carries the textual
-// state, and each bar has a native title tooltip, so state is never
-// color-alone).
-export function Sparkline({ results, max = 40 }: { results: CheckResult[]; max?: number }) {
-  // API returns newest-first; show the most recent `max`, oldest on the left.
-  const recent = results.slice(0, max).reverse();
-  if (recent.length === 0) {
+// Sparkline of recent history, oldest → newest: one thin bar per time bucket,
+// teal when every check in the bucket passed, red when any failed. Reads
+// aggregated buckets rather than raw rows — a 24h window used to mean fetching
+// ~1,440 results per monitor to draw 40 bars.
+//
+// Each bar carries a title tooltip and the row's StateBadge states the current
+// condition in words, so nothing here is conveyed by colour alone.
+export function Sparkline({ buckets }: { buckets: SeriesPoint[] }) {
+  if (buckets.length === 0) {
     return <span className="font-mono text-xs text-mist-faint">no checks yet</span>;
   }
 
   const w = 3;
   const gap = 2; // ≥2px surface gap between adjacent marks
   const h = 20;
-  const width = recent.length * (w + gap) - gap;
+  const width = buckets.length * (w + gap) - gap;
 
   return (
     <svg
@@ -25,26 +26,29 @@ export function Sparkline({ results, max = 40 }: { results: CheckResult[]; max?:
       height={h}
       viewBox={`0 0 ${width} ${h}`}
       role="img"
-      aria-label={`Last ${recent.length} checks`}
+      aria-label={`Recent checks across ${buckets.length} intervals`}
       className="shrink-0"
     >
-      {recent.map((r, i) => (
-        <rect
-          key={r.id}
-          x={i * (w + gap)}
-          y={r.ok ? 4 : 0}
-          width={w}
-          height={r.ok ? h - 4 : h}
-          rx={1.5}
-          className={r.ok ? "fill-node/80" : "fill-alert"}
-        >
-          <title>
-            {`${fmtTime(r.checked_at)} — ${r.ok ? "ok" : "failed"}${
-              r.latency_ms !== null ? `, ${r.latency_ms}ms` : ""
-            }${r.error ? ` (${r.error})` : ""}`}
-          </title>
-        </rect>
-      ))}
+      {buckets.map((b, i) => {
+        const failed = b.fail > 0;
+        return (
+          <rect
+            key={b.t}
+            x={i * (w + gap)}
+            y={failed ? 0 : 4}
+            width={w}
+            height={failed ? h : h - 4}
+            rx={1.5}
+            className={failed ? "fill-alert" : "fill-node/80"}
+          >
+            <title>
+              {`${fmtTime(b.t)} — ${b.ok} ok${failed ? `, ${b.fail} failed` : ""}${
+                b.avg_ms !== null ? `, ~${b.avg_ms}ms` : ""
+              }`}
+            </title>
+          </rect>
+        );
+      })}
     </svg>
   );
 }

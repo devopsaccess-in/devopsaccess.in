@@ -26,6 +26,7 @@ covered by package tests · **manual** = part of the pre-launch manual gate in
 | Incident state machine: unknown/up/down, threshold crossing opens exactly one incident, first success resolves | built | unit `TestEvaluate` · E2E `TestIncidentPipeline` |
 | Alert channels: email + Slack webhook, per-channel test send | built | E2E `TestIncidentPipeline` |
 | Down + recovery notifications (restart-safe via `notify_state`, IST timestamps) | built | E2E `TestIncidentPipeline` |
+| Bucketed series endpoint (`/series?window=&buckets=`) powering all charts — Postgres aggregates, so payload is fixed regardless of range; ranges 1h → 30d | built | E2E `TestIncidentPipeline` (bucket counts, bad input, retention bound) |
 | Uptime % and check-result windows (`24h`/`7d`/`30d`) | built | E2E `TestIncidentPipeline` · unit `TestParseWindow` |
 | Public status page — opt-in per tenant (off by default; `PATCH /api/settings` + Settings toggle) | built | E2E `TestIncidentPipeline` (404-before-opt-in) |
 | Public status page — API (`/api/status/{slug}`), no URL/cause leakage | built | E2E `TestIncidentPipeline` |

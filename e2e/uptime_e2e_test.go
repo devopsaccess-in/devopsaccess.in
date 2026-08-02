@@ -404,6 +404,42 @@ func TestIncidentPipeline(t *testing.T) {
 	if statusPhase == 0 {
 		t.Fatalf("failures should be diagnosed with failure_phase=status, got none in %d failures", fails)
 	}
+	// Charts read bucketed series, not raw rows: the payload must stay a fixed
+	// small size regardless of how much history exists, and must still show
+	// both the successes and the failures.
+	var series struct {
+		Window  string `json:"window"`
+		Buckets []struct {
+			OK    int    `json:"ok"`
+			Fail  int    `json:"fail"`
+			AvgMs *int   `json:"avg_ms"`
+			Phase string `json:"phase"`
+		} `json:"buckets"`
+	}
+	c.mustDo(t, "GET", "/api/monitors/"+m.ID+"/series?window=24h&buckets=12", nil, &series, http.StatusOK)
+	if len(series.Buckets) == 0 || len(series.Buckets) > 12 {
+		t.Fatalf("want 1..12 buckets, got %d", len(series.Buckets))
+	}
+	var bOK, bFail int
+	for _, b := range series.Buckets {
+		bOK += b.OK
+		bFail += b.Fail
+	}
+	if bOK == 0 || bFail == 0 {
+		t.Fatalf("series lost detail: %d ok / %d failed across buckets", bOK, bFail)
+	}
+	// Bad bucket counts are rejected rather than silently clamped.
+	for _, bad := range []string{"0", "501", "abc"} {
+		if s := c.do(t, "GET", "/api/monitors/"+m.ID+"/series?buckets="+bad, nil, nil); s != http.StatusBadRequest {
+			t.Errorf("buckets=%s = %d, want 400", bad, s)
+		}
+	}
+	// The longest supported range resolves; beyond retention is refused.
+	c.mustDo(t, "GET", "/api/monitors/"+m.ID+"/series?window=30d", nil, &series, http.StatusOK)
+	if s := c.do(t, "GET", "/api/monitors/"+m.ID+"/series?window=90d", nil, nil); s != http.StatusBadRequest {
+		t.Errorf("window=90d = %d, want 400", s)
+	}
+
 	var uptime struct {
 		Total     int64    `json:"total"`
 		UptimePct *float64 `json:"uptime_pct"`
