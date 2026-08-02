@@ -284,6 +284,25 @@ with no Google rewrite.
 
 ---
 
+## MT-16 — First-run experience
+**Depends on:** a workspace in each setup state.
+1. Sign in as a **brand-new** Google account (incognito) → land on /monitors.
+2. Create a monitor, but **no** channel yet. Reload /monitors, then open the
+   monitor's detail page.
+3. Add an alert channel.
+
+**Expected:**
+- (1) a "Get set up" card with two numbered steps and no monitor rows; the
+  empty state explains both monitor kinds, including cron/heartbeat.
+- (2) an amber warning — "Nobody will be told when something breaks" — naming
+  the monitor count, on **both** the list and the detail page, with a button
+  to add a channel. It is not dismissible.
+- (3) both the card and the warning disappear; the page is just monitors.
+
+**Result:** ⬜
+
+---
+
 ## MT-9 — Cleanup
 1. Delete the test monitors (health-probe-up, health-probe-down) and the test
    channels.
