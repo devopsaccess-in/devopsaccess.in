@@ -254,7 +254,7 @@ restart.
 - (6) journal capped around 500M; VictoriaLogs data well under the 3GiB cap.
 - No ping tokens or monitor ids in the `route` field (route patterns only).
 
-**Result:** ⬜
+**Result:** ✅ 2026-08-02 — victorialogs + vector both active; VictoriaLogs datasource loaded in Grafana (unsigned-plugin drop-in worked); `{service="uptime-api.service"}` returned 49 lines with levels parsed and a volume chart. Access-log middleware confirmed live in prod.
 
 ---
 
@@ -344,6 +344,26 @@ with no Google rewrite.
 - No `$autocapture` or `$pageview` events, and no session recordings — the
   dashboard shows customer infrastructure and must not record it.
 - The person is identified by opaque ids (user id, tenant id/slug) only.
+
+**Result:** ⬜
+
+---
+
+## MT-19 — /uptime product page (post-deploy)
+**Depends on:** Deploy Web having run.
+1. Open https://devopsaccess.in/uptime/ — check it renders and the nav shows
+   **Uptime** as active.
+2. Both "Start monitoring" buttons go to https://app.devopsaccess.in.
+3. Run the Rich Results test:
+   `https://search.google.com/test/rich-results?url=https://devopsaccess.in/uptime/`
+4. Check https://devopsaccess.in/sitemap.xml contains `/uptime/`, and
+   https://devopsaccess.in/llms.txt lists the product.
+5. Resubmit the sitemap in Google Search Console.
+
+**Expected:** page renders with no layout breakage on mobile; Rich Results
+finds **SoftwareApplication** with no errors; sitemap and llms.txt both list
+it. Nothing on the page claims a feature that does not exist — no SMS, no
+on-call schedules, no multi-region probing.
 
 **Result:** ⬜
 

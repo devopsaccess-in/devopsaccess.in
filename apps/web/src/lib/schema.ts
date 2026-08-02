@@ -149,3 +149,30 @@ export function itemList(
     })),
   };
 }
+
+// The uptime product itself. Every claim here has to be visible on the page
+// that emits it — Google penalises schema that overstates the rendered
+// content, and the featureList is the easiest place to drift.
+export function softwareApplication(featureList: string[]): Node {
+  return {
+    "@type": "SoftwareApplication",
+    "@id": abs("/uptime/#software"),
+    name: "DevOps Access Uptime",
+    url: abs("/uptime/"),
+    applicationCategory: "DeveloperApplication",
+    applicationSubCategory: "Website Monitoring",
+    operatingSystem: "Web",
+    description:
+      "Uptime monitoring for websites, APIs and cron jobs, with alerts that say why something broke — expired TLS certificates, DNS failures, missed backup runs — not just that it did.",
+    provider: { "@id": abs("/#organization") },
+    inLanguage: "en",
+    featureList,
+    offers: {
+      "@type": "Offer",
+      price: "0",
+      priceCurrency: "INR",
+      availability: "https://schema.org/LimitedAvailability",
+      description: "Free during early access",
+    },
+  };
+}

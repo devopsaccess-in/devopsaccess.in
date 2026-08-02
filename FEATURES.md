@@ -45,6 +45,7 @@ covered by package tests · **manual** = part of the pre-launch manual gate in
 
 | Feature | Status | Coverage |
 |---|---|---|
+| `/uptime` product page: the public surface for the SaaS — feature copy, a real example alert, India-first positioning, SoftwareApplication JSON-LD, linked from nav/sitemap/llms.txt | built | manual MT-19 |
 | Next.js 16 static site, 19 pages, URL parity with the old Astro site | built (Phase A) | build-time checks in deploy-web.yml; PSI/CLS manual gate |
 | Contact / site-check / waitlist forms → Go contact service (Turnstile, rate limits) | live | unit tests in `services/contact` |
 | Razorpay payment webhook recording | live | unit tests in `services/contact` |

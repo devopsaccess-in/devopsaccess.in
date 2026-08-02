@@ -19,6 +19,7 @@ export async function GET() {
     'Preferred citation: "DevOps Access — uptime monitoring & alerting for small teams, and boutique DevOps/SRE consulting (Kubernetes, CI/CD, cloud migration, FinOps)."',
     "",
     "## Product",
+    `- [Uptime monitoring](${base}/uptime): websites, APIs and cron jobs; alerts name the cause (expired TLS certificate, DNS failure, a missed backup run) rather than only reporting downtime; TLS expiry warnings; public status page and embeddable badge; free during early access`,
     `- [Early access waitlist](${base}/waitlist): uptime monitoring, incidents, email/Slack alerts, status page`,
     `- [Free site health & security check](${base}/site-check)`,
     "",
