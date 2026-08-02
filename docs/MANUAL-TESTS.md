@@ -38,7 +38,7 @@ error banner.
 **Expected:** a "Test alert from DevOps Access" email arrives within ~1 min;
 the row shows "sent ✓".
 
-**Result:** ⬜
+**Result:** ✅ 2026-08-02 — test email delivered (landed in Gmail spam; see MT-15).
 
 ---
 
@@ -87,7 +87,7 @@ covers Slack dispatch logic.)
 - The alert does **not** contain the raw error/URL secrets — subject/body are
   clean.
 
-**Result:** ⬜
+**Result:** ✅ 2026-08-02 — monitor went down, incident opened, DOWN email delivered. Note: httpstat.us reset the connection rather than returning 500, so the diagnosis read "connection reset by peer" — the tcp-phase path, not the status path. Both are valid failures.
 
 ---
 
@@ -218,7 +218,7 @@ restart.
 - The detail page shows no response-time chart or phase breakdown (there is no
   HTTP probe for a heartbeat).
 
-**Result:** ⬜
+**Result:** ✅ 2026-08-02 — ping returned ok; after silence the heartbeat went down with cause "heartbeat is 8s late (last ping 6 minutes ago, expected every 5 minutes)" and the DOWN email arrived. Recovery ping + RESOLVED still to confirm.
 
 ---
 
@@ -242,6 +242,35 @@ restart.
   first; the delete entry still names the monitor.
 - (6) journal capped around 500M; VictoriaLogs data well under the 3GiB cap.
 - No ping tokens or monitor ids in the `route` field (route patterns only).
+
+**Result:** ⬜
+
+---
+
+## MT-15 — Alert email deliverability (lands in inbox, not spam)
+**Depends on:** SPF/DKIM/DMARC for devopsaccess.in, sender alignment.
+**Background:** on 2026-08-02 every alert was accepted by Gmail (`250 OK`) but
+filed as **spam**. Two causes: we sent as `alerts@devopsaccess.in`, which is
+not a Workspace mailbox — Google silently rewrote the sender, and that
+mismatch is a spam signal — and the domain had no DKIM signature.
+
+1. After deploying the sender fix, confirm the address:
+   `sudo grep ALERT_FROM /opt/uptime-*/*.env` → both read
+   `support@devopsaccess.in`.
+2. Check the domain's auth records resolve:
+   ```bash
+   dig +short TXT devopsaccess.in | grep spf
+   dig +short TXT google._domainkey.devopsaccess.in
+   dig +short TXT _dmarc.devopsaccess.in
+   ```
+3. Trigger a fresh alert (break a monitor) and open the received mail →
+   **Show original** in Gmail.
+4. Optional, most objective: send a test to `check-auth@verifier.port25.com`
+   or use mail-tester.com and read the score.
+
+**Expected:** SPF **pass**, DKIM **pass**, DMARC **pass** in "Show original",
+and the alert lands in the **inbox**. Sender reads `support@devopsaccess.in`
+with no Google rewrite.
 
 **Result:** ⬜
 
