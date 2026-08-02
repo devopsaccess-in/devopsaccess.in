@@ -14,6 +14,7 @@ import { PhaseBreakdown, TLSChip } from "@/components/phase-breakdown";
 import { PingURL, fmtSeconds } from "@/components/ping-url";
 import { EditMonitor } from "@/components/edit-monitor";
 import { ConfirmDialog } from "@/components/confirm-dialog";
+import { SetupGuide } from "@/components/setup-guide";
 
 function UptimeTile({ id, window: w }: { id: string; window: string }) {
   const uptime = useQuery({
@@ -102,6 +103,8 @@ export default function MonitorDetailPage({ params }: { params: Promise<{ id: st
           )}
         </p>
       </div>
+
+      <SetupGuide compact />
 
       <div className="grid grid-cols-3 gap-4">
         <UptimeTile id={id} window="24h" />

@@ -7,6 +7,7 @@ import type { CheckResult, Monitor, Uptime } from "@/lib/types";
 import { fmtPct, fmtTime } from "@/lib/format";
 import { StateBadge } from "@/components/state-badge";
 import { Sparkline } from "@/components/sparkline";
+import { SetupGuide } from "@/components/setup-guide";
 
 function MonitorRow({ monitor }: { monitor: Monitor }) {
   const results = useQuery({
@@ -73,15 +74,27 @@ export default function MonitorsPage() {
         </Link>
       </div>
 
+      <SetupGuide />
+
       {monitors.isPending && <p className="font-mono text-sm text-mist-dim">loading…</p>}
       {monitors.isError && <p className="text-alert">{monitors.error.message}</p>}
 
       {monitors.data?.monitors.length === 0 && (
-        <div className="card text-center">
-          <p className="text-mist">No monitors yet.</p>
-          <p className="mt-2 text-sm text-mist-dim">
-            Add your first endpoint and we start checking it within a minute.
+        <div className="card">
+          <p className="text-sm text-mist-dim">
+            Two kinds of thing can be watched:
           </p>
+          <ul className="mt-3 space-y-2 text-sm">
+            <li className="text-mist">
+              <span className="text-white">A website or API</span> — we call it every
+              minute and alert you when it stops answering or returns the wrong status.
+            </li>
+            <li className="text-mist">
+              <span className="text-white">A cron job or backup</span> — it pings a secret
+              URL when it finishes, and we alert you when a run is missed. The failure
+              nobody else catches.
+            </li>
+          </ul>
           <Link href="/monitors/new" className="btn-primary mt-4">
             Add your first monitor
           </Link>

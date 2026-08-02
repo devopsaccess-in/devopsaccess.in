@@ -126,8 +126,13 @@ export default function ChannelsPage() {
           </div>
         ))}
         {channels.data?.channels.length === 0 && (
-          <div className="card text-center text-sm text-mist-dim">
-            No channels yet — incidents will only show in the dashboard until you add one.
+          <div className="card space-y-2 text-sm">
+            <p className="text-white">No channels yet</p>
+            <p className="text-mist-dim">
+              Until you add one, incidents will open silently — visible here, but nobody
+              gets told. Add the address or Slack channel your team actually watches, then
+              send a test to prove it arrives.
+            </p>
           </div>
         )}
       </div>
